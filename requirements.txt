@@ -1,0 +1,27 @@
+# LifeData V4 — Python Dependencies
+# ──────────────────────────────────────────────────────────────
+# Install: pip install -r requirements.txt
+# ──────────────────────────────────────────────────────────────
+
+# Core Engine (Phase 1)
+python-dotenv>=1.0.0        # .env file loading for API keys
+PyYAML>=6.0                 # config.yaml parsing
+
+# Analysis Engine (Phase 4)
+numpy>=1.24.0               # numerical computations
+scipy>=1.10.0               # statistical tests (pearson, spearman)
+
+# World Module — News Sentiment (Phase 3)
+vaderSentiment>=3.3.2       # headline sentiment analysis
+requests>=2.28.0            # API calls
+feedparser>=6.0.0           # RSS feed parsing
+
+# Media Module — Transcription (Phase 3)
+# openai-whisper             # uncomment when ready — large install (~1GB+)
+Pillow>=9.0.0               # EXIF extraction from photos
+
+# Environment Module — Astronomy (Phase 3)
+# pyswisseph                 # uncomment when ready — Swiss Ephemeris
+
+# Database (builtin)
+# sqlite3                    # part of Python stdlib — no install needed

@@ -1,0 +1,66 @@
+# LifeData V4 — .gitignore
+# ──────────────────────────────────────────────────────────────
+# The ONLY files that should be version-controlled are:
+#   - core/        (ETL engine code)
+#   - modules/     (module code)
+#   - analysis/    (analysis engine code)
+#   - scripts/     (API fetch scripts)
+#   - run_etl.py   (entry point)
+#   - config.yaml  (tracked for structure, but keys are ${ENV_VAR} refs)
+#   - .gitignore
+#
+# Everything else is data, secrets, or ephemeral.
+# ──────────────────────────────────────────────────────────────
+
+# Secrets — NEVER commit
+.env
+
+# Database — contains all personal data
+db/
+
+# Raw data — Syncthing landing zone
+raw/
+
+# Binary media files
+media/
+
+# Generated reports (contain personal data summaries)
+reports/
+
+# Logs
+logs/
+
+# Python virtual environment
+venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.bak.*
+
+# V3 legacy (keep out of v4 repo)
+lifedata_etl_v3.py
+cron_test.txt
+
+# Claude & Guides
+USER_GUIDE.md
+CLAUDE.md
+.claude
+
+# Git commands
+git_commands.md
