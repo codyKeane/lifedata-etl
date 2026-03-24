@@ -86,7 +86,7 @@ def fetch_gdelt_events() -> list[dict]:
             for attempt in range(3):
                 resp = requests.get(GDELT_DOC_API, params=params, timeout=30)
                 if resp.status_code == 429:
-                    wait = QUERY_DELAY * (2 ** attempt)
+                    wait = QUERY_DELAY * (2**attempt)
                     print(f"  [{name}] Rate limited, waiting {wait}s...")
                     time.sleep(wait)
                     continue

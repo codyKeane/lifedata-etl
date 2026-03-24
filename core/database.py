@@ -132,8 +132,11 @@ class Database:
 
     def __init__(self, db_path: str):
         self.db_path = os.path.expanduser(db_path)
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        os.makedirs(db_dir, exist_ok=True)
+        os.chmod(db_dir, 0o700)
         self.conn = sqlite3.connect(self.db_path)
+        os.chmod(self.db_path, 0o600)
         self.conn.row_factory = sqlite3.Row
 
         # Performance and safety pragmas
@@ -179,6 +182,7 @@ class Database:
 
         backup_dir = os.path.join(os.path.dirname(self.db_path), "backups")
         os.makedirs(backup_dir, exist_ok=True)
+        os.chmod(backup_dir, 0o700)
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         backup_path = os.path.join(backup_dir, f"lifedata.db.bak.{today}")
@@ -188,6 +192,7 @@ class Database:
             return None
 
         shutil.copy2(self.db_path, backup_path)
+        os.chmod(backup_path, 0o600)
         log.info(f"Database backed up to {backup_path}")
 
         # Prune old backups
@@ -239,7 +244,8 @@ class Database:
                 errors = event.validate()
                 if errors:
                     log.warning(
-                        f"[{module_id}] Invalid event skipped: {errors} — {event}"
+                        f"[{module_id}] Invalid event skipped: {errors} "
+                        f"(event_id={event.event_id})"
                     )
                     skipped += 1
                     continue
@@ -374,8 +380,31 @@ class Database:
         rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    # Allowed first keywords for schema migrations
+    _ALLOWED_MIGRATION_DDL = {"CREATE", "ALTER"}
+
+    def execute_migration(self, sql: str) -> sqlite3.Cursor:
+        """Execute a DDL-only SQL statement for schema migrations.
+
+        Only CREATE and ALTER statements are permitted. This prevents
+        modules from executing arbitrary DML (DROP, DELETE, INSERT, etc.)
+        through the migration interface.
+        """
+        first_word = sql.strip().split()[0].upper() if sql.strip() else ""
+        if first_word not in self._ALLOWED_MIGRATION_DDL:
+            raise ValueError(
+                f"Migration SQL must start with CREATE or ALTER, "
+                f"got: '{first_word}' — full SQL rejected for safety"
+            )
+        log.info(f"Executing migration: {sql[:80]}...")
+        return self.conn.execute(sql)
+
     def execute(self, sql: str, params: Optional[list] = None) -> sqlite3.Cursor:
-        """Execute arbitrary SQL (for schema migrations)."""
+        """Execute SQL with optional parameters.
+
+        WARNING: This method accepts arbitrary SQL. Callers must validate
+        inputs. For schema migrations, use execute_migration() instead.
+        """
         if params:
             return self.conn.execute(sql, params)
         return self.conn.execute(sql)

@@ -12,7 +12,6 @@ All parsers handle both v3 (no %TIMEZONE) and v4 (with %TIMEZONE) formats.
 Unresolved Tasker variables (%TEMP, %MFREE, etc.) are treated as missing.
 """
 
-import os
 from typing import Optional
 
 from core.event import Event
@@ -90,7 +89,11 @@ def parse_battery(file_path: str) -> list[Event]:
                 extra = {}
                 temp = safe_float(temp_str) if not _is_unresolved(temp_str) else None
                 mem_free = safe_int(mem_str) if not _is_unresolved(mem_str) else None
-                uptime = safe_int(uptime_str) if uptime_str and not _is_unresolved(uptime_str) else None
+                uptime = (
+                    safe_int(uptime_str)
+                    if uptime_str and not _is_unresolved(uptime_str)
+                    else None
+                )
 
                 if temp is not None:
                     extra["temp_c"] = temp
@@ -99,17 +102,19 @@ def parse_battery(file_path: str) -> list[Event]:
                 if uptime is not None:
                     extra["uptime_sec"] = uptime
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="device.battery",
-                    event_type="pulse",
-                    value_numeric=batt_pct,
-                    value_json=safe_json(extra) if extra else None,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="device.battery",
+                        event_type="pulse",
+                        value_numeric=batt_pct,
+                        value_json=safe_json(extra) if extra else None,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")
@@ -156,18 +161,20 @@ def parse_screen(file_path: str) -> list[Event]:
                 if batt_pct is not None:
                     extra["battery_pct"] = batt_pct
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="device.screen",
-                    event_type=f"screen_{state}",
-                    value_numeric=batt_pct,
-                    value_text=state,
-                    value_json=safe_json(extra) if extra else None,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="device.screen",
+                        event_type=f"screen_{state}",
+                        value_numeric=batt_pct,
+                        value_text=state,
+                        value_json=safe_json(extra) if extra else None,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")
@@ -211,16 +218,18 @@ def parse_charging(file_path: str) -> list[Event]:
 
                 ts_utc, ts_local = parse_timestamp(epoch_str, tz_offset)
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="device.charging",
-                    event_type=state,
-                    value_numeric=batt_pct,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="device.charging",
+                        event_type=state,
+                        value_numeric=batt_pct,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")
@@ -256,16 +265,18 @@ def parse_bluetooth(file_path: str) -> list[Event]:
 
                 ts_utc, ts_local = parse_timestamp(epoch_str, tz_offset)
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="device.bluetooth",
-                    event_type="bt_event",
-                    value_text=bt_state,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="device.bluetooth",
+                        event_type="bt_event",
+                        value_text=bt_state,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")

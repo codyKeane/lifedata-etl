@@ -8,9 +8,7 @@ Parses Tasker-generated CSV files for environment data:
   - astro_*.csv      → environment.astro
 """
 
-import os
 import re
-from typing import Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -38,7 +36,9 @@ def parse_hourly(file_path: str) -> list[Event]:
     # Split on lines that start with an epoch timestamp (10+ digits)
     # Each such line begins a new record
     lines = content.split("\n")
-    csv_lines = [l for l in lines if l.strip() and re.match(r"^\d{10,}", l.strip())]
+    csv_lines = [
+        line for line in lines if line.strip() and re.match(r"^\d{10,}", line.strip())
+    ]
 
     for line in csv_lines:
         try:
@@ -70,19 +70,21 @@ def parse_hourly(file_path: str) -> list[Event]:
             if accuracy is not None:
                 extra["gps_accuracy_m"] = accuracy
 
-            events.append(Event(
-                timestamp_utc=ts_utc,
-                timestamp_local=ts_local,
-                timezone_offset=DEFAULT_TZ_OFFSET,
-                source_module="environment.hourly",
-                event_type="snapshot",
-                value_numeric=temp_f,
-                value_json=safe_json(extra) if extra else None,
-                location_lat=lat,
-                location_lon=lon,
-                confidence=1.0,
-                parser_version=PARSER_VERSION,
-            ))
+            events.append(
+                Event(
+                    timestamp_utc=ts_utc,
+                    timestamp_local=ts_local,
+                    timezone_offset=DEFAULT_TZ_OFFSET,
+                    source_module="environment.hourly",
+                    event_type="snapshot",
+                    value_numeric=temp_f,
+                    value_json=safe_json(extra) if extra else None,
+                    location_lat=lat,
+                    location_lon=lon,
+                    confidence=1.0,
+                    parser_version=PARSER_VERSION,
+                )
+            )
 
         except Exception as e:
             log.warning(f"{file_path}: hourly parse error: {e}")
@@ -126,19 +128,21 @@ def parse_geofence(file_path: str) -> list[Event]:
                 if accuracy is not None:
                     extra["accuracy_m"] = accuracy
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="environment.location",
-                    event_type="geofence",
-                    value_numeric=accuracy,
-                    value_json=safe_json(extra) if extra else None,
-                    location_lat=lat,
-                    location_lon=lon,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="environment.location",
+                        event_type="geofence",
+                        value_numeric=accuracy,
+                        value_json=safe_json(extra) if extra else None,
+                        location_lat=lat,
+                        location_lon=lon,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: geofence parse error: {e}")
@@ -184,18 +188,20 @@ def parse_astro(file_path: str) -> list[Event]:
                 if sun_hours is not None:
                     extra["sun_hours"] = sun_hours
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="environment.astro",
-                    event_type="daily",
-                    value_numeric=moon_illum,
-                    value_text=moon_phase,
-                    value_json=safe_json(extra) if extra else None,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="environment.astro",
+                        event_type="daily",
+                        value_numeric=moon_illum,
+                        value_text=moon_phase,
+                        value_json=safe_json(extra) if extra else None,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: astro parse error: {e}")
@@ -249,18 +255,20 @@ def parse_barometer_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="environment.pressure",
-                    event_type="local_barometer",
-                    value_numeric=mean_pressure,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="environment.pressure",
+                        event_type="local_barometer",
+                        value_numeric=mean_pressure,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: barometer parse error: {e}")
@@ -300,18 +308,20 @@ def parse_light_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="environment.light",
-                    event_type="lux_reading",
-                    value_numeric=mean_lux,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="environment.light",
+                        event_type="lux_reading",
+                        value_numeric=mean_lux,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: light parse error: {e}")
@@ -351,18 +361,20 @@ def parse_magnetometer_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="environment.emf",
-                    event_type="magnetometer",
-                    value_numeric=mean_mag,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="environment.emf",
+                        event_type="magnetometer",
+                        value_numeric=mean_mag,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: magnetometer parse error: {e}")
@@ -375,4 +387,3 @@ def parse_magnetometer_summary(file_path: str) -> list[Event]:
 PARSER_REGISTRY["barometer_summary"] = parse_barometer_summary
 PARSER_REGISTRY["light_summary"] = parse_light_summary
 PARSER_REGISTRY["magnetometer_summary"] = parse_magnetometer_summary
-

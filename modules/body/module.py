@@ -20,10 +20,8 @@ Derived metrics (computed in post_ingest):
   body.derived/sleep_duration     → paired sleep_start/sleep_end duration
 """
 
-import json
-import math
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from core.event import Event
 from core.logger import get_logger
@@ -44,6 +42,7 @@ class BodyModule(ModuleInterface):
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.body.parsers import PARSER_REGISTRY
+
             self._parser_registry = PARSER_REGISTRY
         return self._parser_registry
 
@@ -155,26 +154,36 @@ class BodyModule(ModuleInterface):
             """,
             (today,),
         )
-        row = rows.fetchone() if hasattr(rows, 'fetchone') else (rows[0] if rows else None)
+        row = (
+            rows.fetchone()
+            if hasattr(rows, "fetchone")
+            else (rows[0] if rows else None)
+        )
         if row and row[0] is not None and row[0] > 0:
             step_total = int(row[0])
             step_goal = self._config.get("step_goal", 8000)
-            derived_events.append(Event(
-                timestamp_utc=now_utc,
-                timestamp_local=now_utc,
-                timezone_offset="-0500",
-                source_module="body.derived",
-                event_type="daily_step_total",
-                value_numeric=float(step_total),
-                value_json=safe_json({
-                    "readings": row[1],
-                    "goal": step_goal,
-                    "goal_pct": round(step_total / step_goal * 100, 1),
-                }),
-                confidence=0.95,
-                parser_version=self.version,
-            ))
-            log.info(f"Daily steps: {step_total} ({round(step_total / step_goal * 100, 1)}% of goal)")
+            derived_events.append(
+                Event(
+                    timestamp_utc=now_utc,
+                    timestamp_local=now_utc,
+                    timezone_offset="-0500",
+                    source_module="body.derived",
+                    event_type="daily_step_total",
+                    value_numeric=float(step_total),
+                    value_json=safe_json(
+                        {
+                            "readings": row[1],
+                            "goal": step_goal,
+                            "goal_pct": round(step_total / step_goal * 100, 1),
+                        }
+                    ),
+                    confidence=0.95,
+                    parser_version=self.version,
+                )
+            )
+            log.info(
+                f"Daily steps: {step_total} ({round(step_total / step_goal * 100, 1)}% of goal)"
+            )
 
         # --- Caffeine pharmacokinetic model ---
         half_life = self._config.get("caffeine_half_life_hours", 5.0)
@@ -191,7 +200,7 @@ class BodyModule(ModuleInterface):
             (today,),
         )
         caffeine_events = []
-        result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
+        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
         for r in result_set:
             ts = r[0]
             mg = safe_float(r[1])
@@ -215,21 +224,25 @@ class BodyModule(ModuleInterface):
                     continue
 
             total_remaining = round(total_remaining, 1)
-            derived_events.append(Event(
-                timestamp_utc=now_utc,
-                timestamp_local=now_utc,
-                timezone_offset="-0500",
-                source_module="body.derived",
-                event_type="caffeine_level",
-                value_numeric=total_remaining,
-                value_json=safe_json({
-                    "intakes_today": len(caffeine_events),
-                    "total_ingested_mg": sum(mg for _, mg in caffeine_events),
-                    "half_life_hours": half_life,
-                }),
-                confidence=0.85,
-                parser_version=self.version,
-            ))
+            derived_events.append(
+                Event(
+                    timestamp_utc=now_utc,
+                    timestamp_local=now_utc,
+                    timezone_offset="-0500",
+                    source_module="body.derived",
+                    event_type="caffeine_level",
+                    value_numeric=total_remaining,
+                    value_json=safe_json(
+                        {
+                            "intakes_today": len(caffeine_events),
+                            "total_ingested_mg": sum(mg for _, mg in caffeine_events),
+                            "half_life_hours": half_life,
+                        }
+                    ),
+                    confidence=0.85,
+                    parser_version=self.version,
+                )
+            )
             log.info(
                 f"Caffeine level: {total_remaining}mg remaining "
                 f"({len(caffeine_events)} intakes today)"
@@ -249,7 +262,7 @@ class BodyModule(ModuleInterface):
             (today, today),
         )
         sleep_events = []
-        result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
+        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
         for r in result_set:
             sleep_events.append((r[0], r[1]))
 
@@ -271,21 +284,27 @@ class BodyModule(ModuleInterface):
 
                     if 0 < duration_hours < 24:  # sanity check
                         sleep_target = self._config.get("sleep_target_hours", 7.5)
-                        derived_events.append(Event(
-                            timestamp_utc=now_utc,
-                            timestamp_local=now_utc,
-                            timezone_offset="-0500",
-                            source_module="body.derived",
-                            event_type="sleep_duration",
-                            value_numeric=duration_hours,
-                            value_json=safe_json({
-                                "duration_min": round(duration_min, 0),
-                                "target_hours": sleep_target,
-                                "delta_hours": round(duration_hours - sleep_target, 2),
-                            }),
-                            confidence=0.9,
-                            parser_version=self.version,
-                        ))
+                        derived_events.append(
+                            Event(
+                                timestamp_utc=now_utc,
+                                timestamp_local=now_utc,
+                                timezone_offset="-0500",
+                                source_module="body.derived",
+                                event_type="sleep_duration",
+                                value_numeric=duration_hours,
+                                value_json=safe_json(
+                                    {
+                                        "duration_min": round(duration_min, 0),
+                                        "target_hours": sleep_target,
+                                        "delta_hours": round(
+                                            duration_hours - sleep_target, 2
+                                        ),
+                                    }
+                                ),
+                                confidence=0.9,
+                                parser_version=self.version,
+                            )
+                        )
                         log.info(
                             f"Sleep duration: {duration_hours}h "
                             f"(target: {sleep_target}h, "
@@ -318,7 +337,7 @@ class BodyModule(ModuleInterface):
         )
 
         summary = {}
-        result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
+        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
         for row in result_set:
             src, evt, cnt, avg_val, sum_val, min_val, max_val = row
             key = f"{src}.{evt}"

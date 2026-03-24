@@ -41,19 +41,20 @@ DEFAULT_TZ_OFFSET = "-0500"
 
 # Which sensors to process (skipping uncalibrated variants)
 SENSOR_FILES = {
-    "Accelerometer.csv":  "accelerometer",
-    "Gravity.csv":        "gravity",
-    "Barometer.csv":      "barometer",
-    "Light.csv":          "light",
-    "Magnetometer.csv":   "magnetometer",
-    "Pedometer.csv":      "pedometer",
-    "Activity.csv":       "activity",
+    "Accelerometer.csv": "accelerometer",
+    "Gravity.csv": "gravity",
+    "Barometer.csv": "barometer",
+    "Light.csv": "light",
+    "Magnetometer.csv": "magnetometer",
+    "Pedometer.csv": "pedometer",
+    "Activity.csv": "activity",
 }
 
 
 # ──────────────────────────────────────────────────────────────
 # Utility Functions
 # ──────────────────────────────────────────────────────────────
+
 
 def ns_to_epoch_sec(ns_timestamp: int) -> float:
     """Convert nanosecond timestamp to epoch seconds."""
@@ -109,6 +110,7 @@ def safe_int(val: str) -> int | None:
 # Activity Classification (per EPSILON spec)
 # ──────────────────────────────────────────────────────────────
 
+
 def classify_activity(accel_magnitude_std: float) -> str:
     """Classify activity from accelerometer magnitude standard deviation.
 
@@ -127,6 +129,7 @@ def classify_activity(accel_magnitude_std: float) -> str:
 # ──────────────────────────────────────────────────────────────
 # Stream Processors — one per sensor type
 # ──────────────────────────────────────────────────────────────
+
 
 def _stream_csv(filepath: str):
     """Stream rows from a CSV, yielding (nanosecond_ts, fields_dict) pairs.
@@ -374,6 +377,7 @@ def process_activity(filepath: str, window_min: int) -> dict:
 # Summary CSV Writers
 # ──────────────────────────────────────────────────────────────
 
+
 def _read_session_metadata(session_dir: str) -> dict:
     """Read Metadata.csv from the session directory for timezone info."""
     meta_path = os.path.join(session_dir, "Metadata.csv")
@@ -392,9 +396,12 @@ def _read_session_metadata(session_dir: str) -> dict:
                 try:
                     from zoneinfo import ZoneInfo
                     from datetime import datetime as dt
+
                     tz = ZoneInfo(tz_str)
                     epoch_str = row.get("recording epoch time", "0")
-                    epoch = int(epoch_str) / 1000 if len(epoch_str) > 10 else int(epoch_str)
+                    epoch = (
+                        int(epoch_str) / 1000 if len(epoch_str) > 10 else int(epoch_str)
+                    )
                     offset = dt.fromtimestamp(epoch, tz=tz).strftime("%z")
                     meta["timezone_offset"] = offset
                 except Exception:
@@ -413,19 +420,37 @@ def write_movement_summary(session_dir: str, accel_data: dict, tz_offset: str) -
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "mean_accel_mag", "std_accel_mag", "min_accel_mag", "max_accel_mag",
-            "activity_class", "sample_count",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "mean_accel_mag",
+                "std_accel_mag",
+                "min_accel_mag",
+                "max_accel_mag",
+                "activity_class",
+                "sample_count",
+            ]
+        )
         for wk in sorted(accel_data.keys()):
             d = accel_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["mean_mag"], d["std_mag"], d["min_mag"], d["max_mag"],
-                d["activity"], d["count"],
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["mean_mag"],
+                    d["std_mag"],
+                    d["min_mag"],
+                    d["max_mag"],
+                    d["activity"],
+                    d["count"],
+                ]
+            )
 
     return out_path
 
@@ -438,19 +463,35 @@ def write_barometer_summary(session_dir: str, baro_data: dict, tz_offset: str) -
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "mean_pressure_hpa", "min_pressure_hpa", "max_pressure_hpa",
-            "mean_altitude_m", "sample_count",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "mean_pressure_hpa",
+                "min_pressure_hpa",
+                "max_pressure_hpa",
+                "mean_altitude_m",
+                "sample_count",
+            ]
+        )
         for wk in sorted(baro_data.keys()):
             d = baro_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["mean_pressure"], d["min_pressure"], d["max_pressure"],
-                d["mean_altitude"], d["count"],
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["mean_pressure"],
+                    d["min_pressure"],
+                    d["max_pressure"],
+                    d["mean_altitude"],
+                    d["count"],
+                ]
+            )
 
     return out_path
 
@@ -463,17 +504,33 @@ def write_light_summary(session_dir: str, light_data: dict, tz_offset: str) -> s
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "mean_lux", "min_lux", "max_lux", "sample_count",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "mean_lux",
+                "min_lux",
+                "max_lux",
+                "sample_count",
+            ]
+        )
         for wk in sorted(light_data.keys()):
             d = light_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["mean_lux"], d["min_lux"], d["max_lux"], d["count"],
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["mean_lux"],
+                    d["min_lux"],
+                    d["max_lux"],
+                    d["count"],
+                ]
+            )
 
     return out_path
 
@@ -486,17 +543,33 @@ def write_magnetometer_summary(session_dir: str, mag_data: dict, tz_offset: str)
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "mean_mag_ut", "std_mag_ut", "max_mag_ut", "sample_count",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "mean_mag_ut",
+                "std_mag_ut",
+                "max_mag_ut",
+                "sample_count",
+            ]
+        )
         for wk in sorted(mag_data.keys()):
             d = mag_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["mean_mag_ut"], d["std_mag_ut"], d["max_mag_ut"], d["count"],
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["mean_mag_ut"],
+                    d["std_mag_ut"],
+                    d["max_mag_ut"],
+                    d["count"],
+                ]
+            )
 
     return out_path
 
@@ -509,17 +582,29 @@ def write_pedometer_summary(session_dir: str, ped_data: dict, tz_offset: str) ->
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "steps_delta", "cumulative_steps",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "steps_delta",
+                "cumulative_steps",
+            ]
+        )
         for wk in sorted(ped_data.keys()):
             d = ped_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["steps_delta"], d["last_steps"],
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["steps_delta"],
+                    d["last_steps"],
+                ]
+            )
 
     return out_path
 
@@ -534,18 +619,29 @@ def write_activity_summary(session_dir: str, act_data: dict, tz_offset: str) -> 
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "epoch", "date", "time", "timezone_offset",
-            "dominant_activity", "activity_counts_json",
-        ])
+        writer.writerow(
+            [
+                "epoch",
+                "date",
+                "time",
+                "timezone_offset",
+                "dominant_activity",
+                "activity_counts_json",
+            ]
+        )
         for wk in sorted(act_data.keys()):
             d = act_data[wk]
             date_str, time_str, _, _ = epoch_to_local(wk, tz_offset)
-            writer.writerow([
-                wk, date_str, time_str, tz_offset,
-                d["dominant_activity"],
-                json.dumps(d["activity_counts"]),
-            ])
+            writer.writerow(
+                [
+                    wk,
+                    date_str,
+                    time_str,
+                    tz_offset,
+                    d["dominant_activity"],
+                    json.dumps(d["activity_counts"]),
+                ]
+            )
 
     return out_path
 
@@ -553,6 +649,7 @@ def write_activity_summary(session_dir: str, act_data: dict, tz_offset: str) -> 
 # ──────────────────────────────────────────────────────────────
 # Main Processing Pipeline
 # ──────────────────────────────────────────────────────────────
+
 
 def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> dict:
     """Process a single Sensor Logger session directory.
@@ -571,19 +668,19 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
 
     meta = _read_session_metadata(session_dir)
     tz_offset = meta["timezone_offset"]
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Processing session: {os.path.basename(session_dir)}")
     print(f"  Device: {meta['device']}")
     print(f"  Timezone: {tz_offset}")
     print(f"  Window: {window_min} minutes")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     results = {}
 
     # --- Accelerometer → movement_summary ---
     accel_path = os.path.join(session_dir, "Accelerometer.csv")
     if os.path.exists(accel_path):
-        print(f"\n  Processing Accelerometer.csv...")
+        print("\n  Processing Accelerometer.csv...")
         accel_data = process_accelerometer(accel_path, window_min)
         out = write_movement_summary(session_dir, accel_data, tz_offset)
         results["movement_summary"] = {"path": out, "windows": len(accel_data)}
@@ -592,7 +689,7 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
     # --- Barometer → barometer_summary ---
     baro_path = os.path.join(session_dir, "Barometer.csv")
     if os.path.exists(baro_path):
-        print(f"\n  Processing Barometer.csv...")
+        print("\n  Processing Barometer.csv...")
         baro_data = process_barometer(baro_path, window_min)
         out = write_barometer_summary(session_dir, baro_data, tz_offset)
         results["barometer_summary"] = {"path": out, "windows": len(baro_data)}
@@ -601,7 +698,7 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
     # --- Light → light_summary ---
     light_path = os.path.join(session_dir, "Light.csv")
     if os.path.exists(light_path):
-        print(f"\n  Processing Light.csv...")
+        print("\n  Processing Light.csv...")
         light_data = process_light(light_path, window_min)
         out = write_light_summary(session_dir, light_data, tz_offset)
         results["light_summary"] = {"path": out, "windows": len(light_data)}
@@ -610,7 +707,7 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
     # --- Magnetometer → magnetometer_summary ---
     mag_path = os.path.join(session_dir, "Magnetometer.csv")
     if os.path.exists(mag_path):
-        print(f"\n  Processing Magnetometer.csv...")
+        print("\n  Processing Magnetometer.csv...")
         mag_data = process_magnetometer(mag_path, window_min)
         out = write_magnetometer_summary(session_dir, mag_data, tz_offset)
         results["magnetometer_summary"] = {"path": out, "windows": len(mag_data)}
@@ -619,7 +716,7 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
     # --- Pedometer → pedometer_summary ---
     ped_path = os.path.join(session_dir, "Pedometer.csv")
     if os.path.exists(ped_path):
-        print(f"\n  Processing Pedometer.csv...")
+        print("\n  Processing Pedometer.csv...")
         ped_data = process_pedometer(ped_path, window_min)
         out = write_pedometer_summary(session_dir, ped_data, tz_offset)
         results["pedometer_summary"] = {"path": out, "windows": len(ped_data)}
@@ -628,7 +725,7 @@ def process_session(session_dir: str, window_min: int = DEFAULT_WINDOW_MIN) -> d
     # --- Activity → activity_summary ---
     act_path = os.path.join(session_dir, "Activity.csv")
     if os.path.exists(act_path):
-        print(f"\n  Processing Activity.csv...")
+        print("\n  Processing Activity.csv...")
         act_data = process_activity(act_path, window_min)
         out = write_activity_summary(session_dir, act_data, tz_offset)
         results["activity_summary"] = {"path": out, "windows": len(act_data)}
@@ -661,16 +758,19 @@ def main():
         description="Process Sensor Logger raw data into windowed summaries"
     )
     parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         help="Path to a specific session directory to process",
     )
     parser.add_argument(
-        "--all", "-a",
+        "--all",
+        "-a",
         action="store_true",
         help="Process all sessions in the default sensor directory",
     )
     parser.add_argument(
-        "--window", "-w",
+        "--window",
+        "-w",
         type=int,
         default=DEFAULT_WINDOW_MIN,
         help=f"Window size in minutes (default: {DEFAULT_WINDOW_MIN})",
@@ -689,6 +789,7 @@ def main():
         # Load from config
         try:
             import yaml
+
             config_path = os.path.expanduser("~/LifeData/config.yaml")
             with open(config_path) as f:
                 config = yaml.safe_load(f)
@@ -699,9 +800,7 @@ def main():
             sensors_dir = os.path.join(raw_base, sensor_dir_rel)
         except Exception as e:
             print(f"Warning: Could not load config.yaml: {e}")
-            sensors_dir = os.path.expanduser(
-                "~/LifeData/raw/LifeData/logs/sensors"
-            )
+            sensors_dir = os.path.expanduser("~/LifeData/raw/LifeData/logs/sensors")
 
     if args.input:
         # Process single session
@@ -720,7 +819,9 @@ def main():
             if os.path.isdir(summary_dir):
                 summary_files = os.listdir(summary_dir)
                 if len(summary_files) >= 4:
-                    print(f"\n  Skipping {os.path.basename(session)} (already processed)")
+                    print(
+                        f"\n  Skipping {os.path.basename(session)} (already processed)"
+                    )
                     continue
 
             process_session(session, args.window)

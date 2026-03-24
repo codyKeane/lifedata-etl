@@ -1,0 +1,441 @@
+"""
+Tests for core/database.py — SAVEPOINT rollback, deduplication, schema, migrations.
+"""
+
+import sqlite3
+
+import pytest
+
+from core.database import Database
+from core.event import Event
+
+
+# ──────────────────────────────────────────────────────────────
+# Schema
+# ──────────────────────────────────────────────────────────────
+
+
+class TestSchema:
+    """Verify database schema creation and table structure."""
+
+    def test_events_table_exists(self, db_conn):
+        tables = {
+            row[0]
+            for row in db_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "events" in tables
+
+    def test_modules_table_exists(self, db_conn):
+        tables = {
+            row[0]
+            for row in db_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "modules" in tables
+
+    def test_daily_summaries_table_exists(self, db_conn):
+        tables = {
+            row[0]
+            for row in db_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "daily_summaries" in tables
+
+    def test_correlations_table_exists(self, db_conn):
+        tables = {
+            row[0]
+            for row in db_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "correlations" in tables
+
+    def test_media_table_exists(self, db_conn):
+        tables = {
+            row[0]
+            for row in db_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "media" in tables
+
+    def test_events_columns(self, db_conn):
+        info = db_conn.execute("PRAGMA table_info(events)").fetchall()
+        col_names = {row[1] for row in info}
+        expected = {
+            "event_id",
+            "timestamp_utc",
+            "timestamp_local",
+            "timezone_offset",
+            "source_module",
+            "event_type",
+            "value_numeric",
+            "value_text",
+            "value_json",
+            "tags",
+            "location_lat",
+            "location_lon",
+            "media_ref",
+            "confidence",
+            "raw_source_id",
+            "parser_version",
+            "created_at",
+        }
+        assert expected.issubset(col_names)
+
+    def test_wal_mode_enabled(self, db_conn):
+        mode = db_conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode == "wal"
+
+    def test_ensure_schema_idempotent(self, db):
+        """Calling ensure_schema twice should not error."""
+        db.ensure_schema()
+        db.ensure_schema()
+
+
+# ──────────────────────────────────────────────────────────────
+# Event insertion and deduplication
+# ──────────────────────────────────────────────────────────────
+
+
+class TestInsertEvents:
+    """Test event insertion via insert_events_for_module."""
+
+    def test_insert_valid_event(self, db, valid_event):
+        inserted, skipped = db.insert_events_for_module("device", [valid_event])
+        assert inserted == 1
+        assert skipped == 0
+
+    def test_insert_counts_match(self, db, valid_event_factory):
+        events = [
+            valid_event_factory(timestamp_utc=f"2026-03-24T{h:02d}:00:00+00:00")
+            for h in range(5)
+        ]
+        inserted, skipped = db.insert_events_for_module("device", events)
+        assert inserted == 5
+        assert skipped == 0
+
+    def test_invalid_event_skipped(self, db, valid_event_factory):
+        bad = valid_event_factory(source_module="", value_numeric=1.0)
+        good = valid_event_factory()
+        inserted, skipped = db.insert_events_for_module("device", [bad, good])
+        assert inserted == 1
+        assert skipped == 1
+
+    def test_dedup_insert_or_replace(self, db, valid_event_factory):
+        """Inserting the same event twice yields one row (INSERT OR REPLACE)."""
+        e = valid_event_factory()
+        db.insert_events_for_module("device", [e])
+        db.insert_events_for_module("device", [e])
+        count = db.count_events(source_module="device.battery")
+        assert count == 1
+
+    def test_dedup_preserves_latest_data(self, db, valid_event_factory):
+        """INSERT OR REPLACE keeps the last-written row's data."""
+        e1 = valid_event_factory(confidence=0.5)
+        e2 = valid_event_factory(confidence=0.9)
+        db.insert_events_for_module("device", [e1])
+        db.insert_events_for_module("device", [e2])
+        rows = db.query_events(source_module="device.battery")
+        assert len(rows) == 1
+        assert rows[0]["confidence"] == 0.9
+
+    def test_affected_dates_tracked(self, db, valid_event_factory):
+        db.reset_affected_dates()
+        e = valid_event_factory(timestamp_local="2026-03-24T10:00:00-05:00")
+        db.insert_events_for_module("device", [e])
+        dates = db.get_affected_dates()
+        assert "2026-03-24" in dates
+
+    def test_reset_affected_dates(self, db, valid_event_factory):
+        e = valid_event_factory()
+        db.insert_events_for_module("device", [e])
+        db.reset_affected_dates()
+        assert len(db.get_affected_dates()) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# SAVEPOINT rollback
+# ──────────────────────────────────────────────────────────────
+
+
+class TestSavepointRollback:
+    """SAVEPOINT isolation: one module's failure must not affect others."""
+
+    def test_rollback_on_exception(self, db, valid_event_factory):
+        """If insertion raises, all events for that module are rolled back."""
+        good_event = valid_event_factory(
+            source_module="device.battery",
+            timestamp_utc="2026-03-24T10:00:00+00:00",
+        )
+        db.insert_events_for_module("device", [good_event])
+        pre_count = db.count_events(source_module="device.battery")
+        assert pre_count == 1
+
+        # Create an event that will cause a DB-level error by injecting
+        # a bad tuple via monkey-patching
+        class BadEvent(Event):
+            def to_db_tuple(self):
+                raise sqlite3.IntegrityError("simulated failure")
+
+            def validate(self):
+                return []
+
+        bad = BadEvent(
+            timestamp_utc="2026-03-24T11:00:00+00:00",
+            timestamp_local="2026-03-24T06:00:00-05:00",
+            timezone_offset="-0500",
+            source_module="social.call",
+            event_type="incoming",
+            value_numeric=120.0,
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            db.insert_events_for_module("social", [bad])
+
+        # The first module's data should still be there
+        assert db.count_events(source_module="device.battery") == 1
+        # The failed module's data should be rolled back
+        assert db.count_events(source_module="social.call") == 0
+
+    def test_module_isolation(self, db, valid_event_factory):
+        """Events from module A survive even when module B fails."""
+        # Insert module A events
+        events_a = [
+            valid_event_factory(
+                source_module="device.screen",
+                event_type="screen_on",
+                value_text="on",
+                timestamp_utc=f"2026-03-24T{h:02d}:00:00+00:00",
+            )
+            for h in range(3)
+        ]
+        inserted_a, _ = db.insert_events_for_module("device", events_a)
+        assert inserted_a == 3
+
+        # Module B insert with forced failure mid-batch
+        class FailingEvent(Event):
+            def validate(self):
+                return []
+
+            def to_db_tuple(self):
+                raise RuntimeError("module B crash")
+
+        fail_event = FailingEvent(
+            timestamp_utc="2026-03-24T15:00:00+00:00",
+            timestamp_local="2026-03-24T10:00:00-05:00",
+            timezone_offset="-0500",
+            source_module="mind.mood",
+            event_type="check_in",
+            value_numeric=7.0,
+        )
+
+        with pytest.raises(RuntimeError):
+            db.insert_events_for_module("mind", [fail_event])
+
+        # Module A events are intact
+        assert db.count_events(source_module="device.screen") == 3
+        # Module B events are gone
+        assert db.count_events(source_module="mind.mood") == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# Migration DDL safety
+# ──────────────────────────────────────────────────────────────
+
+
+class TestMigrationSafety:
+    """Only CREATE and ALTER DDL allowed through execute_migration."""
+
+    def test_create_allowed(self, db):
+        db.execute_migration(
+            "CREATE TABLE IF NOT EXISTS test_table (id TEXT PRIMARY KEY)"
+        )
+        # Should not raise
+
+    def test_alter_allowed(self, db):
+        db.execute_migration(
+            "CREATE TABLE IF NOT EXISTS test_alter (id TEXT PRIMARY KEY)"
+        )
+        db.execute_migration("ALTER TABLE test_alter ADD COLUMN new_col TEXT")
+
+    def test_drop_rejected(self, db):
+        with pytest.raises(ValueError, match="DROP"):
+            db.execute_migration("DROP TABLE events")
+
+    def test_delete_rejected(self, db):
+        with pytest.raises(ValueError, match="DELETE"):
+            db.execute_migration("DELETE FROM events WHERE 1=1")
+
+    def test_insert_rejected(self, db):
+        with pytest.raises(ValueError, match="INSERT"):
+            db.execute_migration("INSERT INTO events (event_id) VALUES ('x')")
+
+    def test_update_rejected(self, db):
+        with pytest.raises(ValueError, match="UPDATE"):
+            db.execute_migration("UPDATE events SET confidence = 0")
+
+    def test_empty_sql_rejected(self, db):
+        with pytest.raises(ValueError):
+            db.execute_migration("")
+
+
+# ──────────────────────────────────────────────────────────────
+# Query and count helpers
+# ──────────────────────────────────────────────────────────────
+
+
+class TestQueryHelpers:
+    """Test query_events and count_events with filters."""
+
+    def test_count_by_module(self, db, valid_event_factory):
+        db.insert_events_for_module(
+            "device",
+            [
+                valid_event_factory(source_module="device.battery"),
+            ],
+        )
+        db.insert_events_for_module(
+            "mind",
+            [
+                valid_event_factory(
+                    source_module="mind.mood",
+                    event_type="check_in",
+                    timestamp_utc="2026-03-24T20:00:00+00:00",
+                ),
+            ],
+        )
+        assert db.count_events(source_module="device.battery") == 1
+        assert db.count_events(source_module="mind.mood") == 1
+
+    def test_count_by_date(self, db, valid_event_factory):
+        db.insert_events_for_module(
+            "device",
+            [
+                valid_event_factory(
+                    timestamp_local="2026-03-24T10:00:00-05:00",
+                ),
+            ],
+        )
+        assert db.count_events(date="2026-03-24") == 1
+        assert db.count_events(date="2026-03-25") == 0
+
+    def test_query_order_injection_fallback(self, db, valid_event_factory):
+        """Invalid ORDER BY clause should fall back to default."""
+        db.insert_events_for_module("device", [valid_event_factory()])
+        # Should not raise even with a malicious order
+        rows = db.query_events(order="1; DROP TABLE events--")
+        assert len(rows) >= 0
+
+    def test_query_min_confidence(self, db, valid_event_factory):
+        db.insert_events_for_module(
+            "device",
+            [
+                valid_event_factory(confidence=0.3),
+            ],
+        )
+        rows_all = db.query_events(min_confidence=0.0)
+        rows_high = db.query_events(min_confidence=0.5)
+        assert len(rows_all) == 1
+        assert len(rows_high) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# Daily summaries
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDailySummaries:
+    """Test upsert_daily_summary."""
+
+    def test_insert_summary(self, db):
+        db.upsert_daily_summary(
+            "2026-03-24",
+            "device.derived",
+            "unlock_count",
+            value_numeric=42.0,
+        )
+        row = db.conn.execute(
+            "SELECT value_numeric FROM daily_summaries "
+            "WHERE date_local = '2026-03-24' AND metric_name = 'unlock_count'"
+        ).fetchone()
+        assert row[0] == 42.0
+
+    def test_upsert_overwrites(self, db):
+        db.upsert_daily_summary(
+            "2026-03-24",
+            "device.derived",
+            "unlock_count",
+            value_numeric=42.0,
+        )
+        db.upsert_daily_summary(
+            "2026-03-24",
+            "device.derived",
+            "unlock_count",
+            value_numeric=55.0,
+        )
+        row = db.conn.execute(
+            "SELECT value_numeric FROM daily_summaries "
+            "WHERE date_local = '2026-03-24' AND metric_name = 'unlock_count'"
+        ).fetchone()
+        assert row[0] == 55.0
+
+
+# ──────────────────────────────────────────────────────────────
+# Module status tracking
+# ──────────────────────────────────────────────────────────────
+
+
+class TestModuleStatus:
+    """Test update_module_status."""
+
+    def test_success_status(self, db):
+        db.update_module_status("device", "Device Module", "1.0.0", success=True)
+        row = db.conn.execute(
+            "SELECT last_status FROM modules WHERE module_id = 'device'"
+        ).fetchone()
+        assert row[0] == "success"
+
+    def test_failed_status_with_error(self, db):
+        db.update_module_status(
+            "device",
+            "Device Module",
+            "1.0.0",
+            success=False,
+            error="parse crash",
+        )
+        row = db.conn.execute(
+            "SELECT last_status, last_error FROM modules WHERE module_id = 'device'"
+        ).fetchone()
+        assert row[0] == "failed"
+        assert row[1] == "parse crash"
+
+    def test_upsert_updates_existing(self, db):
+        db.update_module_status("device", "Device Module", "1.0.0", success=True)
+        db.update_module_status(
+            "device", "Device Module", "1.1.0", success=False, error="oops"
+        )
+        row = db.conn.execute(
+            "SELECT version, last_status FROM modules WHERE module_id = 'device'"
+        ).fetchone()
+        assert row[0] == "1.1.0"
+        assert row[1] == "failed"
+
+
+# ──────────────────────────────────────────────────────────────
+# Context manager
+# ──────────────────────────────────────────────────────────────
+
+
+class TestContextManager:
+    def test_context_manager_closes(self, tmp_path):
+        db_path = str(tmp_path / "ctx.db")
+        with Database(db_path) as database:
+            database.ensure_schema()
+        # After exit, connection should be closed
+        with pytest.raises(Exception):
+            database.conn.execute("SELECT 1")

@@ -1,27 +1,37 @@
 # LifeData V4 — Python Dependencies
 # ──────────────────────────────────────────────────────────────
 # Install: pip install -r requirements.txt
+# Versions pinned to exact releases to prevent supply chain attacks.
+# To upgrade: review changelogs, test, then update pins here.
 # ──────────────────────────────────────────────────────────────
 
-# Core Engine (Phase 1)
-python-dotenv>=1.0.0        # .env file loading for API keys
-PyYAML>=6.0                 # config.yaml parsing
+# Core Engine
+python-dotenv==1.2.2          # .env file loading for API keys
+PyYAML==6.0.3                 # config.yaml parsing
+pydantic==2.12.5              # config validation schema
 
-# Analysis Engine (Phase 4)
-numpy>=1.24.0               # numerical computations
-scipy>=1.10.0               # statistical tests (pearson, spearman)
+# HTTP & Feeds
+requests==2.32.5              # API calls (scripts, modules)
+certifi==2026.2.25            # TLS certificate bundle (requests dep)
+charset-normalizer==3.4.6     # encoding detection (requests dep)
+idna==3.11                    # internationalized domain names (requests dep)
+urllib3==2.6.3                # HTTP library (requests dep)
+feedparser==6.0.12            # RSS feed parsing
+sgmllib3k==1.0.0              # SGML parser (feedparser dep)
 
-# World Module — News Sentiment (Phase 3)
-vaderSentiment>=3.3.2       # headline sentiment analysis
-requests>=2.28.0            # API calls
-feedparser>=6.0.0           # RSS feed parsing
+# Analysis Engine
+numpy==2.4.3                  # numerical computations
+scipy==1.17.1                 # statistical tests (pearson, spearman)
 
-# Media Module — Transcription (Phase 3)
-# openai-whisper             # uncomment when ready — large install (~1GB+)
-Pillow>=9.0.0               # EXIF extraction from photos
+# NLP
+vaderSentiment==3.3.2         # headline sentiment analysis
 
-# Environment Module — Astronomy (Phase 3)
-# pyswisseph                 # uncomment when ready — Swiss Ephemeris
+# Media
+Pillow==12.1.1                # EXIF extraction from photos
 
-# Database (builtin)
-# sqlite3                    # part of Python stdlib — no install needed
+# Astronomy
+astral==3.2                   # sunrise/sunset, planetary hours
+
+# Optional (uncomment when ready)
+# openai-whisper               # transcription (~1GB+ install)
+# pyswisseph                   # Swiss Ephemeris calculations

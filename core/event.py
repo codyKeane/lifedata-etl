@@ -8,10 +8,16 @@ is represented as an Event conforming to the Universal Event Schema.
 """
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
+
+# Maximum field lengths to prevent database bloat from malformed input
+MAX_VALUE_TEXT_LEN = 50_000
+MAX_VALUE_JSON_LEN = 100_000
+MAX_TAGS_LEN = 1_000
 
 
 @dataclass
@@ -68,15 +74,13 @@ class Event:
         None values are encoded as the literal string 'None' for consistency.
         """
         num_str = (
-            f"{self.value_numeric:.6f}"
-            if self.value_numeric is not None
-            else "None"
+            f"{self.value_numeric:.6f}" if self.value_numeric is not None else "None"
         )
         raw = (
             f"{self.timestamp_utc}|{self.source_module}|"
             f"{self.event_type}|{self.value_text}|{num_str}"
         )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
     @property
     def event_id(self) -> str:
@@ -87,9 +91,7 @@ class Event:
         - media_ref foreign keys remain valid.
         - Cached correlation pointers don't go stale.
         """
-        digest = hashlib.sha256(
-            self.raw_source_id.encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha256(self.raw_source_id.encode("utf-8")).hexdigest()
         return str(uuid.UUID(hex=digest[:32]))
 
     def validate(self) -> list[str]:
@@ -132,6 +134,27 @@ class Event:
             errors.append(
                 f"confidence must be between 0.0 and 1.0, got {self.confidence}"
             )
+
+        # Validate value_json is actually valid JSON
+        if self.value_json is not None:
+            try:
+                json.loads(self.value_json)
+            except (json.JSONDecodeError, TypeError):
+                errors.append("value_json is not valid JSON")
+
+        # Enforce size limits to prevent database bloat
+        if self.value_text and len(self.value_text) > MAX_VALUE_TEXT_LEN:
+            errors.append(
+                f"value_text exceeds {MAX_VALUE_TEXT_LEN} chars "
+                f"(got {len(self.value_text)})"
+            )
+        if self.value_json and len(self.value_json) > MAX_VALUE_JSON_LEN:
+            errors.append(
+                f"value_json exceeds {MAX_VALUE_JSON_LEN} chars "
+                f"(got {len(self.value_json)})"
+            )
+        if self.tags and len(self.tags) > MAX_TAGS_LEN:
+            errors.append(f"tags exceeds {MAX_TAGS_LEN} chars (got {len(self.tags)})")
 
         return errors
 

@@ -71,6 +71,12 @@ def setup_logging(
     fh.setFormatter(StructuredFormatter())
     logger.addHandler(fh)
 
+    # Restrict log file permissions — logs may contain sensitive data paths
+    try:
+        os.chmod(expanded_path, 0o600)
+    except OSError:
+        pass
+
     # Console handler: human-readable
     ch = logging.StreamHandler()
     ch.setFormatter(

@@ -15,7 +15,6 @@ Parses CSV files for physiological and biometric data:
 
 import json
 import os
-from typing import Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -28,7 +27,7 @@ PARSER_VERSION = "1.0.0"
 
 # V3 quicklog category → (source_module, event_type) mapping
 QUICKLOG_CATEGORIES = {
-    "1":  ("body.caffeine", "intake"),
+    "1": ("body.caffeine", "intake"),
     "10": ("body.meal", "logged"),
     "11": ("body.vape", "session"),
     "12": ("body.exercise", "session"),
@@ -115,19 +114,23 @@ def parse_quicklog(file_path: str) -> list[Event]:
                     value_text = value_str or "session"
                     value_numeric = None
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module=source_module,
-                    event_type=event_type,
-                    value_numeric=value_numeric,
-                    value_text=value_text,
-                    value_json=safe_json(value_json_data) if value_json_data else None,
-                    tags="quicklog,manual",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module=source_module,
+                        event_type=event_type,
+                        value_numeric=value_numeric,
+                        value_text=value_text,
+                        value_json=safe_json(value_json_data)
+                        if value_json_data
+                        else None,
+                        tags="quicklog,manual",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: quicklog parse error: {e}")
@@ -197,18 +200,20 @@ def parse_samsung_health(file_path: str) -> list[Event]:
                 actual_source = source_module
                 actual_event = event_type
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module=actual_source,
-                    event_type=actual_event,
-                    value_numeric=value,
-                    value_json=safe_json(extra),
-                    tags="automated,health",
-                    confidence=0.95,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module=actual_source,
+                        event_type=actual_event,
+                        value_numeric=value,
+                        value_json=safe_json(extra),
+                        tags="automated,health",
+                        confidence=0.95,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: health parse error: {e}")
@@ -253,18 +258,20 @@ def parse_sleep(file_path: str) -> list[Event]:
                 if battery is not None:
                     extra["battery_pct"] = battery
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="body.sleep",
-                    event_type=event_type,
-                    value_numeric=battery,
-                    value_json=safe_json(extra) if extra else None,
-                    tags="sleep,automated",
-                    confidence=0.9,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="body.sleep",
+                        event_type=event_type,
+                        value_numeric=battery,
+                        value_json=safe_json(extra) if extra else None,
+                        tags="sleep,automated",
+                        confidence=0.9,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: sleep parse error: {e}")
@@ -303,19 +310,21 @@ def parse_reaction(file_path: str) -> list[Event]:
 
                 extra = {"color": color, "unit": "ms"}
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="body.cognition",
-                    event_type="reaction_time",
-                    value_numeric=reaction_ms,
-                    value_text=color,
-                    value_json=safe_json(extra),
-                    tags="cognition,manual",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="body.cognition",
+                        event_type="reaction_time",
+                        value_numeric=reaction_ms,
+                        value_text=color,
+                        value_json=safe_json(extra),
+                        tags="cognition,manual",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: reaction parse error: {e}")
@@ -338,6 +347,7 @@ def parse_movement_summary(file_path: str) -> list[Event]:
     events = []
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
+
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:
@@ -363,19 +373,21 @@ def parse_movement_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="body.movement",
-                    event_type="accelerometer_summary",
-                    value_numeric=std_mag,  # intensity proxy
-                    value_text=activity,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=0.85,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="body.movement",
+                        event_type="accelerometer_summary",
+                        value_numeric=std_mag,  # intensity proxy
+                        value_text=activity,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=0.85,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: movement parse error: {e}")
@@ -392,6 +404,7 @@ def parse_activity_summary(file_path: str) -> list[Event]:
     events = []
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
+
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:
@@ -411,18 +424,20 @@ def parse_activity_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="body.activity",
-                    event_type="classification",
-                    value_text=dominant,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=0.7,  # threshold classifier per ALPHA spec
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="body.activity",
+                        event_type="classification",
+                        value_text=dominant,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=0.7,  # threshold classifier per ALPHA spec
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: activity parse error: {e}")
@@ -439,6 +454,7 @@ def parse_pedometer_summary(file_path: str) -> list[Event]:
     events = []
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
+
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:
@@ -460,18 +476,20 @@ def parse_pedometer_summary(file_path: str) -> list[Event]:
                     "source": "sensor_logger",
                 }
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_off,
-                    source_module="body.steps",
-                    event_type="step_count",
-                    value_numeric=steps_delta,
-                    value_json=safe_json(extra),
-                    tags="sensor_logger,automated,5min_window",
-                    confidence=0.85,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_off,
+                        source_module="body.steps",
+                        event_type="step_count",
+                        value_numeric=steps_delta,
+                        value_json=safe_json(extra),
+                        tags="sensor_logger,automated,5min_window",
+                        confidence=0.85,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: pedometer parse error: {e}")

@@ -40,6 +40,7 @@ class WorldModule(ModuleInterface):
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.world.parsers import PARSER_REGISTRY
+
             self._parser_registry = PARSER_REGISTRY
         return self._parser_registry
 
@@ -161,21 +162,25 @@ class WorldModule(ModuleInterface):
         # News Sentiment Index (NSI)
         if sentiments:
             nsi = round(sum(sentiments) / len(sentiments), 4)
-            derived_events.append(Event(
-                timestamp_utc=now_utc,
-                timestamp_local=now_utc,
-                timezone_offset="-0500",
-                source_module="world.derived",
-                event_type="news_sentiment_index",
-                value_numeric=nsi,
-                value_json=safe_json({
-                    "sample_size": len(sentiments),
-                    "min": round(min(sentiments), 4),
-                    "max": round(max(sentiments), 4),
-                }),
-                confidence=0.9,
-                parser_version=self.version,
-            ))
+            derived_events.append(
+                Event(
+                    timestamp_utc=now_utc,
+                    timestamp_local=now_utc,
+                    timezone_offset="-0500",
+                    source_module="world.derived",
+                    event_type="news_sentiment_index",
+                    value_numeric=nsi,
+                    value_json=safe_json(
+                        {
+                            "sample_size": len(sentiments),
+                            "min": round(min(sentiments), 4),
+                            "max": round(max(sentiments), 4),
+                        }
+                    ),
+                    confidence=0.9,
+                    parser_version=self.version,
+                )
+            )
             log.info(f"NSI: {nsi:.4f} (from {len(sentiments)} headlines)")
 
         # Information Entropy
@@ -186,33 +191,32 @@ class WorldModule(ModuleInterface):
             entropy = -sum(p * math.log2(p) for p in probs if p > 0)
             entropy = round(entropy, 4)
 
-            derived_events.append(Event(
-                timestamp_utc=now_utc,
-                timestamp_local=now_utc,
-                timezone_offset="-0500",
-                source_module="world.derived",
-                event_type="information_entropy",
-                value_numeric=entropy,
-                value_json=safe_json({
-                    "category_counts": dict(cat_counts),
-                    "num_categories": len(cat_counts),
-                }),
-                confidence=0.9,
-                parser_version=self.version,
-            ))
+            derived_events.append(
+                Event(
+                    timestamp_utc=now_utc,
+                    timestamp_local=now_utc,
+                    timezone_offset="-0500",
+                    source_module="world.derived",
+                    event_type="information_entropy",
+                    value_numeric=entropy,
+                    value_json=safe_json(
+                        {
+                            "category_counts": dict(cat_counts),
+                            "num_categories": len(cat_counts),
+                        }
+                    ),
+                    confidence=0.9,
+                    parser_version=self.version,
+                )
+            )
             log.info(
-                f"Information entropy: {entropy:.4f} "
-                f"({len(cat_counts)} categories)"
+                f"Information entropy: {entropy:.4f} ({len(cat_counts)} categories)"
             )
 
         # Insert derived events
         if derived_events:
-            inserted, skipped = db.insert_events_for_module(
-                "world", derived_events
-            )
-            log.info(
-                f"Derived metrics: {inserted} inserted, {skipped} skipped"
-            )
+            inserted, skipped = db.insert_events_for_module("world", derived_events)
+            log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
 
     def get_daily_summary(self, db, date_str: str) -> dict | None:
         """Return daily summary metrics for the report generator."""

@@ -54,7 +54,9 @@ def fetch_bitcoin() -> dict | None:
                 "change_24h_pct": round(change, 2) if change is not None else None,
                 "fetched_utc": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"  [Bitcoin] ${result['value_usd']:,.2f} ({result['change_24h_pct']}%)")
+            print(
+                f"  [Bitcoin] ${result['value_usd']:,.2f} ({result['change_24h_pct']}%)"
+            )
             return result
     except Exception as e:
         print(f"  [Bitcoin] ERROR: {e}")

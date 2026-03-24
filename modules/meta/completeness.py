@@ -64,12 +64,14 @@ def check_daily_completeness(db, date_str: str) -> dict:
         if met:
             total_met += 1
         else:
-            report["missing"].append({
-                "source": source,
-                "expected_min": min_count,
-                "actual": actual,
-                "description": desc,
-            })
+            report["missing"].append(
+                {
+                    "source": source,
+                    "expected_min": min_count,
+                    "actual": actual,
+                    "description": desc,
+                }
+            )
 
         report["required"][source] = {
             "expected": min_count,
@@ -81,9 +83,7 @@ def check_daily_completeness(db, date_str: str) -> dict:
         actual = db.count_events(source_module=source, date=date_str)
         report["optional"][source] = actual
         if actual == 0:
-            report["warnings"].append(
-                f"No {source} events (optional but unusual)"
-            )
+            report["warnings"].append(f"No {source} events (optional but unusual)")
 
     report["overall_pct"] = (
         round(total_met / total_expected * 100, 1) if total_expected > 0 else 0.0

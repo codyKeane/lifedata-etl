@@ -8,13 +8,18 @@ with SAVEPOINT isolation.
 """
 
 import importlib
+import json
 import os
 import re
+import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
 
+from core.config_schema import ConfigValidationError, validate_config
 from core.database import Database
 from core.logger import get_logger, setup_logging
 from core.module_interface import ModuleInterface
@@ -23,6 +28,9 @@ log = get_logger("lifedata.orchestrator")
 
 # Allowed file extensions for module parsing
 ALLOWED_EXTENSIONS = {".csv", ".json"}
+
+# Skip files modified within this many seconds (Syncthing mid-sync protection)
+FILE_STABILITY_SECONDS = 60
 
 # Regex to resolve ${ENV_VAR} placeholders in config values
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
@@ -43,10 +51,16 @@ class Orchestrator:
 
         self.config = self._load_config(config_path)
 
+        # Validate config — fail fast with clear errors
+        try:
+            validate_config(self.config)
+            log.info("Config validation passed")
+        except ConfigValidationError as e:
+            log.error(str(e))
+            raise
+
         # Set up structured logging now that we have the config
-        log_path = self.config["lifedata"].get(
-            "log_path", "~/LifeData/logs/etl.log"
-        )
+        log_path = self.config["lifedata"].get("log_path", "~/LifeData/logs/etl.log")
         setup_logging(log_path)
 
         self.db = Database(self.config["lifedata"]["db_path"])
@@ -63,22 +77,33 @@ class Orchestrator:
         return config
 
     @staticmethod
+    def _resolve_env_var_match(m):
+        """Resolve a single ${ENV_VAR} match, logging a warning if unset."""
+        var_name = m.group(1)
+        value = os.environ.get(var_name)
+        if value is None:
+            log.warning(
+                f"Environment variable '{var_name}' is not set — "
+                f"replaced with empty string in config"
+            )
+            return ""
+        return value
+
+    @staticmethod
     def _resolve_env_vars(obj):
         """Recursively resolve ${ENV_VAR} patterns in config values."""
         if isinstance(obj, dict):
             for key, value in obj.items():
                 if isinstance(value, str) and "${" in value:
                     obj[key] = _ENV_VAR_RE.sub(
-                        lambda m: os.environ.get(m.group(1), ""), value
+                        Orchestrator._resolve_env_var_match, value
                     )
                 elif isinstance(value, (dict, list)):
                     Orchestrator._resolve_env_vars(value)
         elif isinstance(obj, list):
             for i, item in enumerate(obj):
                 if isinstance(item, str) and "${" in item:
-                    obj[i] = _ENV_VAR_RE.sub(
-                        lambda m: os.environ.get(m.group(1), ""), item
-                    )
+                    obj[i] = _ENV_VAR_RE.sub(Orchestrator._resolve_env_var_match, item)
                 elif isinstance(item, (dict, list)):
                     Orchestrator._resolve_env_vars(item)
 
@@ -114,9 +139,7 @@ class Orchestrator:
         """
         self.modules = []
         allowlist = (
-            self.config["lifedata"]
-            .get("security", {})
-            .get("module_allowlist", [])
+            self.config["lifedata"].get("security", {}).get("module_allowlist", [])
         )
         modules_dir = Path(__file__).parent.parent / "modules"
 
@@ -137,14 +160,19 @@ class Orchestrator:
                 continue
 
             # SECURITY: only load modules explicitly allowlisted in config
-            if allowlist and module_name not in allowlist:
+            # Fail-closed: if allowlist is empty or missing, refuse to load
+            if not allowlist:
+                log.error(
+                    "No module allowlist configured in config.yaml — "
+                    "refusing to load any modules (fail-closed)"
+                )
+                return
+            if module_name not in allowlist:
                 log.warning(f"Module '{module_name}' not in allowlist, skipping")
                 continue
 
             # Check if module is enabled
-            module_config = (
-                self.config["lifedata"]["modules"].get(module_name, {})
-            )
+            module_config = self.config["lifedata"]["modules"].get(module_name, {})
             if not module_config.get("enabled", True):
                 log.info(f"Module '{module_name}' is disabled, skipping")
                 continue
@@ -169,7 +197,6 @@ class Orchestrator:
                 mod = importlib.import_module(f"modules.{module_name}.module")
                 instance = mod.create_module(module_config)
 
-
                 if not isinstance(instance, ModuleInterface):
                     log.error(
                         f"Module '{module_name}' doesn't implement ModuleInterface"
@@ -177,13 +204,9 @@ class Orchestrator:
                     continue
 
                 self.modules.append(instance)
-                log.info(
-                    f"Loaded module: {instance.module_id} v{instance.version}"
-                )
+                log.info(f"Loaded module: {instance.module_id} v{instance.version}")
             except Exception as e:
-                log.error(
-                    f"Failed to load module '{module_name}': {e}", exc_info=True
-                )
+                log.error(f"Failed to load module '{module_name}': {e}", exc_info=True)
 
     def run(
         self,
@@ -223,30 +246,31 @@ class Orchestrator:
             log.warning("No modules loaded — nothing to do")
             return {"total_events": 0, "failed_modules": [], "modules_run": 0}
 
+        run_start = time.time()
         total_events = 0
         total_skipped = 0
         failed_modules: list[str] = []
-        raw_base = os.path.expanduser(
-            self.config["lifedata"]["raw_base"]
-        )
+        module_metrics: dict[str, dict] = {}
+        raw_base = os.path.expanduser(self.config["lifedata"]["raw_base"])
 
         for module in self.modules:
             log.info(f"[{module.module_id}] Starting module run")
 
             try:
-                # Schema migrations
+                # Schema migrations (DDL only)
                 for sql in module.schema_migrations():
-                    self.db.execute(sql)
+                    self.db.execute_migration(sql)
 
                 # Discover files → validate paths → filter extensions
                 all_files = module.discover_files(raw_base)
 
                 safe_files = []
+                now = time.time()
+                unstable_count = 0
                 for f in all_files:
                     if not self._is_safe_path(f, raw_base):
                         log.warning(
-                            f"[{module.module_id}] Path escapes raw_base, "
-                            f"skipping: {f}"
+                            f"[{module.module_id}] Path escapes raw_base, skipping: {f}"
                         )
                         continue
                     ext = Path(f).suffix.lower()
@@ -256,12 +280,33 @@ class Orchestrator:
                             f"'{ext}', skipping: {f}"
                         )
                         continue
+                    # Skip files modified within the stability window
+                    # (likely mid-sync by Syncthing — parsing a half-written
+                    # file produces corrupt data or truncated rows)
+                    try:
+                        mtime = os.path.getmtime(f)
+                        if (now - mtime) < FILE_STABILITY_SECONDS:
+                            log.info(
+                                f"[{module.module_id}] Skipping unstable file "
+                                f"(modified {now - mtime:.0f}s ago): {f}"
+                            )
+                            unstable_count += 1
+                            continue
+                    except OSError:
+                        # File disappeared between discover and stat — skip it
+                        continue
                     safe_files.append(f)
 
                 rejected = len(all_files) - len(safe_files)
                 log.info(
                     f"[{module.module_id}] Found {len(safe_files)} safe files"
                     + (f" ({rejected} rejected)" if rejected else "")
+                    + (
+                        f" ({unstable_count} deferred — modified within "
+                        f"{FILE_STABILITY_SECONDS}s)"
+                        if unstable_count
+                        else ""
+                    )
                 )
 
                 # Parse all files
@@ -271,9 +316,7 @@ class Orchestrator:
                         parsed = module.parse(f)
                         events.extend(parsed)
                     except Exception as e:
-                        log.warning(
-                            f"[{module.module_id}] Failed to parse {f}: {e}"
-                        )
+                        log.warning(f"[{module.module_id}] Failed to parse {f}: {e}")
 
                 log.info(f"[{module.module_id}] Parsed {len(events)} events")
 
@@ -297,9 +340,16 @@ class Orchestrator:
                     + (f" ({skipped} invalid skipped)" if skipped else "")
                 )
 
-                # Post-ingest hooks
+                # Post-ingest hooks (isolated — a hook crash should not
+                # undo successfully inserted events)
                 if not dry_run:
-                    module.post_ingest(self.db)
+                    try:
+                        module.post_ingest(self.db)
+                    except Exception as e:
+                        log.error(
+                            f"[{module.module_id}] post_ingest() failed: {e}",
+                            exc_info=True,
+                        )
 
                 self.db.update_module_status(
                     module.module_id,
@@ -308,18 +358,27 @@ class Orchestrator:
                     success=True,
                 )
 
+                module_metrics[module.module_id] = {
+                    "events": inserted,
+                    "errors": 0,
+                }
+
             except Exception as e:
-                log.error(
-                    f"[{module.module_id}] MODULE FAILED: {e}", exc_info=True
-                )
+                log.error(f"[{module.module_id}] MODULE FAILED: {e}", exc_info=True)
                 failed_modules.append(module.module_id)
+                # Truncate and sanitize error for storage
+                error_msg = str(e)[:200]
                 self.db.update_module_status(
                     module.module_id,
                     display_name=module.display_name,
                     version=module.version,
                     success=False,
-                    error=str(e),
+                    error=error_msg,
                 )
+                module_metrics[module.module_id] = {
+                    "events": 0,
+                    "errors": 1,
+                }
 
         log.info(
             f"ETL complete: {total_events} new events, "
@@ -344,6 +403,9 @@ class Orchestrator:
             except Exception as e:
                 log.error(f"Report generation failed: {e}", exc_info=True)
 
+        # Export run metrics
+        self._write_metrics(run_start, module_metrics, dry_run)
+
         summary = {
             "total_events": total_events,
             "total_skipped": total_skipped,
@@ -354,3 +416,42 @@ class Orchestrator:
 
         log.info("=" * 60)
         return summary
+
+    def _write_metrics(
+        self,
+        run_start: float,
+        module_metrics: dict[str, dict],
+        dry_run: bool,
+    ) -> None:
+        """Append a JSON-lines entry to logs/metrics.jsonl."""
+        duration = round(time.time() - run_start, 2)
+        db_path = os.path.expanduser(self.config["lifedata"]["db_path"])
+
+        try:
+            db_size_bytes = os.path.getsize(db_path)
+        except OSError:
+            db_size_bytes = 0
+
+        disk = shutil.disk_usage(os.path.expanduser("~/LifeData"))
+
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "duration_seconds": duration,
+            "dry_run": dry_run,
+            "events_per_module": {m: d["events"] for m, d in module_metrics.items()},
+            "errors_per_module": {m: d["errors"] for m, d in module_metrics.items()},
+            "total_events": sum(d["events"] for d in module_metrics.values()),
+            "total_errors": sum(d["errors"] for d in module_metrics.values()),
+            "db_size_bytes": db_size_bytes,
+            "disk_free_bytes": disk.free,
+        }
+
+        metrics_path = os.path.expanduser("~/LifeData/logs/metrics.jsonl")
+        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+
+        try:
+            with open(metrics_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            log.info(f"Metrics written to {metrics_path}")
+        except OSError as e:
+            log.warning(f"Failed to write metrics: {e}")

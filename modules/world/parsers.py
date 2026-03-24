@@ -10,9 +10,7 @@ Parses JSON files produced by the fetch scripts in scripts/:
 """
 
 import json
-import os
 from datetime import datetime, timezone
-from typing import Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -84,18 +82,20 @@ def parse_news_json(file_path: str) -> list[Event]:
             if art.get("sentiment_detail"):
                 extra["sentiment_detail"] = art["sentiment_detail"]
 
-            events.append(Event(
-                timestamp_utc=ts_utc,
-                timestamp_local=ts_local,
-                timezone_offset=DEFAULT_TZ_OFFSET,
-                source_module="world.news",
-                event_type="headline",
-                value_numeric=sentiment,
-                value_text=title[:500],
-                value_json=safe_json(extra),
-                confidence=0.9,
-                parser_version=PARSER_VERSION,
-            ))
+            events.append(
+                Event(
+                    timestamp_utc=ts_utc,
+                    timestamp_local=ts_local,
+                    timezone_offset=DEFAULT_TZ_OFFSET,
+                    source_module="world.news",
+                    event_type="headline",
+                    value_numeric=sentiment,
+                    value_text=title[:500],
+                    value_json=safe_json(extra),
+                    confidence=0.9,
+                    parser_version=PARSER_VERSION,
+                )
+            )
         except Exception as e:
             log.warning(f"news parse error: {e}")
             continue
@@ -136,17 +136,19 @@ def parse_markets_json(file_path: str) -> list[Event]:
             if ind.get("period"):
                 extra["period"] = ind["period"]
 
-            events.append(Event(
-                timestamp_utc=ts_utc,
-                timestamp_local=ts_local,
-                timezone_offset=DEFAULT_TZ_OFFSET,
-                source_module="world.markets",
-                event_type=indicator_name,
-                value_numeric=value,
-                value_json=safe_json(extra) if extra else None,
-                confidence=1.0,
-                parser_version=PARSER_VERSION,
-            ))
+            events.append(
+                Event(
+                    timestamp_utc=ts_utc,
+                    timestamp_local=ts_local,
+                    timezone_offset=DEFAULT_TZ_OFFSET,
+                    source_module="world.markets",
+                    event_type=indicator_name,
+                    value_numeric=value,
+                    value_json=safe_json(extra) if extra else None,
+                    confidence=1.0,
+                    parser_version=PARSER_VERSION,
+                )
+            )
         except Exception as e:
             log.warning(f"markets parse error: {e}")
             continue
@@ -190,18 +192,20 @@ def parse_rss_json(file_path: str) -> list[Event]:
                 "url": art.get("link", ""),
             }
 
-            events.append(Event(
-                timestamp_utc=ts_utc,
-                timestamp_local=ts_local,
-                timezone_offset=DEFAULT_TZ_OFFSET,
-                source_module="world.rss",
-                event_type="article",
-                value_numeric=sentiment,
-                value_text=title[:500],
-                value_json=safe_json(extra),
-                confidence=0.85,
-                parser_version=PARSER_VERSION,
-            ))
+            events.append(
+                Event(
+                    timestamp_utc=ts_utc,
+                    timestamp_local=ts_local,
+                    timezone_offset=DEFAULT_TZ_OFFSET,
+                    source_module="world.rss",
+                    event_type="article",
+                    value_numeric=sentiment,
+                    value_text=title[:500],
+                    value_json=safe_json(extra),
+                    confidence=0.85,
+                    parser_version=PARSER_VERSION,
+                )
+            )
         except Exception as e:
             log.warning(f"rss parse error: {e}")
             continue
@@ -246,18 +250,20 @@ def parse_gdelt_json(file_path: str) -> list[Event]:
                 "query_name": art.get("query_name", ""),
             }
 
-            events.append(Event(
-                timestamp_utc=ts_utc,
-                timestamp_local=ts_local,
-                timezone_offset=DEFAULT_TZ_OFFSET,
-                source_module="world.gdelt",
-                event_type="global_event",
-                value_numeric=tone,
-                value_text=title[:500],
-                value_json=safe_json(extra),
-                confidence=0.8,
-                parser_version=PARSER_VERSION,
-            ))
+            events.append(
+                Event(
+                    timestamp_utc=ts_utc,
+                    timestamp_local=ts_local,
+                    timezone_offset=DEFAULT_TZ_OFFSET,
+                    source_module="world.gdelt",
+                    event_type="global_event",
+                    value_numeric=tone,
+                    value_text=title[:500],
+                    value_json=safe_json(extra),
+                    confidence=0.8,
+                    parser_version=PARSER_VERSION,
+                )
+            )
         except Exception as e:
             log.warning(f"gdelt parse error: {e}")
             continue

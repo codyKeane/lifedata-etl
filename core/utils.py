@@ -141,6 +141,11 @@ def glob_files(
         Sorted list of absolute file paths.
     """
     expanded = os.path.expanduser(directory)
+    # Reject patterns containing path traversal components
+    if ".." in pattern or os.path.isabs(pattern):
+        raise ValueError(
+            f"Glob pattern must not contain '..' or absolute paths, got: {pattern}"
+        )
     if recursive:
         full_pattern = os.path.join(expanded, "**", pattern)
         files = glob.glob(full_pattern, recursive=True)

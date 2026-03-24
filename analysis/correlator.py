@@ -10,7 +10,6 @@ environment.sound events at confidence=0.1 are filtered out).
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from core.logger import get_logger
 
@@ -34,9 +33,7 @@ class Correlator:
         Returns dict mapping date string -> average value_numeric for that day.
         Only events with confidence >= min_confidence are included.
         """
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=window_days)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
 
         rows = self.db.conn.execute(
             """
@@ -143,9 +140,7 @@ class Correlator:
             "confidence_tier": self.confidence_tier(len(aligned)),
         }
 
-    def run_correlation_matrix(
-        self, metrics: list[str], window_days: int = 30
-    ) -> dict:
+    def run_correlation_matrix(self, metrics: list[str], window_days: int = 30) -> dict:
         """Run all pairwise correlations between a list of metrics.
 
         Returns matrix + ranked list of strongest correlations.

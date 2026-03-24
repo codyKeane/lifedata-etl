@@ -13,12 +13,11 @@ post_ingest.
 """
 
 import json
-from datetime import datetime, timezone
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import now_utc_iso, safe_json, today_local
+from core.utils import safe_json, today_local
 
 log = get_logger("lifedata.meta")
 
@@ -78,8 +77,8 @@ class MetaModule(ModuleInterface):
         fixed_ts = f"{date_str}T00:00:00+00:00"
 
         from core.utils import parse_timestamp
-        ts_utc, ts_local = parse_timestamp(fixed_ts, DEFAULT_TZ_OFFSET)
 
+        ts_utc, ts_local = parse_timestamp(fixed_ts, DEFAULT_TZ_OFFSET)
 
         # --- Completeness Check ---
         if self._config.get("completeness_check", True):
@@ -87,25 +86,29 @@ class MetaModule(ModuleInterface):
                 from modules.meta.completeness import check_daily_completeness
 
                 report = check_daily_completeness(db, date_str)
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="meta.completeness",
-                    event_type="daily_check",
-                    value_numeric=report["overall_pct"],
-                    value_json=safe_json({
-                        "date": date_str,
-                        "missing_count": len(report["missing"]),
-                        "missing_sources": [
-                            m["source"] for m in report["missing"]
-                        ],
-                        "warning_count": len(report["warnings"]),
-                    }),
-                    tags="health,completeness",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="meta.completeness",
+                        event_type="daily_check",
+                        value_numeric=report["overall_pct"],
+                        value_json=safe_json(
+                            {
+                                "date": date_str,
+                                "missing_count": len(report["missing"]),
+                                "missing_sources": [
+                                    m["source"] for m in report["missing"]
+                                ],
+                                "warning_count": len(report["warnings"]),
+                            }
+                        ),
+                        tags="health,completeness",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
                 log.info(
                     f"Completeness: {report['overall_pct']}% "
                     f"({len(report['missing'])} missing)"
@@ -120,29 +123,33 @@ class MetaModule(ModuleInterface):
 
                 issues = validate_events(db, date_str)
                 issue_count = len(issues)
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="meta.quality",
-                    event_type="daily_check",
-                    value_numeric=float(issue_count),
-                    value_json=safe_json({
-                        "date": date_str,
-                        "issue_count": issue_count,
-                        "issues": [
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="meta.quality",
+                        event_type="daily_check",
+                        value_numeric=float(issue_count),
+                        value_json=safe_json(
                             {
-                                "type": i["type"],
-                                "severity": i.get("severity", "info"),
-                                "message": i["message"],
+                                "date": date_str,
+                                "issue_count": issue_count,
+                                "issues": [
+                                    {
+                                        "type": i["type"],
+                                        "severity": i.get("severity", "info"),
+                                        "message": i["message"],
+                                    }
+                                    for i in issues[:20]  # Cap at 20 for JSON size
+                                ],
                             }
-                            for i in issues[:20]  # Cap at 20 for JSON size
-                        ],
-                    }),
-                    tags="health,quality",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                        ),
+                        tags="health,quality",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
                 log.info(f"Quality: {issue_count} issue(s)")
             except Exception as e:
                 log.error(f"Quality check failed: {e}", exc_info=True)
@@ -160,29 +167,32 @@ class MetaModule(ModuleInterface):
                 disk = report.get("disk", {})
                 db_size = report.get("database", {}).get("size_mb", 0)
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="meta.storage",
-                    event_type="usage_report",
-                    value_numeric=db_size,
-                    value_json=safe_json({
-                        "date": date_str,
-                        "db_size_mb": db_size,
-                        "raw_size_mb": report.get(
-                            "raw_data", {}
-                        ).get("size_mb", 0),
-                        "disk_free_gb": disk.get("free_gb", 0),
-                        "disk_used_pct": disk.get("used_pct", 0),
-                    }),
-                    tags="health,storage",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="meta.storage",
+                        event_type="usage_report",
+                        value_numeric=db_size,
+                        value_json=safe_json(
+                            {
+                                "date": date_str,
+                                "db_size_mb": db_size,
+                                "raw_size_mb": report.get("raw_data", {}).get(
+                                    "size_mb", 0
+                                ),
+                                "disk_free_gb": disk.get("free_gb", 0),
+                                "disk_used_pct": disk.get("used_pct", 0),
+                            }
+                        ),
+                        tags="health,storage",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
                 log.info(
-                    f"Storage: DB {db_size} MB, "
-                    f"disk {disk.get('free_gb', '?')} GB free"
+                    f"Storage: DB {db_size} MB, disk {disk.get('free_gb', '?')} GB free"
                 )
             except Exception as e:
                 log.error(f"Storage check failed: {e}", exc_info=True)
@@ -195,22 +205,26 @@ class MetaModule(ModuleInterface):
                 raw_base = self._get_raw_base()
                 lag = check_sync_lag(raw_base)
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="meta.sync",
-                    event_type="sync_status",
-                    value_numeric=float(lag["newest_file_age_minutes"]),
-                    value_json=safe_json({
-                        "date": date_str,
-                        "lag_minutes": lag["newest_file_age_minutes"],
-                        "healthy": lag["healthy"],
-                    }),
-                    tags="health,sync",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="meta.sync",
+                        event_type="sync_status",
+                        value_numeric=float(lag["newest_file_age_minutes"]),
+                        value_json=safe_json(
+                            {
+                                "date": date_str,
+                                "lag_minutes": lag["newest_file_age_minutes"],
+                                "healthy": lag["healthy"],
+                            }
+                        ),
+                        tags="health,sync",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
                 log.info(f"Sync: {lag['message']}")
             except Exception as e:
                 log.error(f"Sync lag check failed: {e}", exc_info=True)
@@ -223,25 +237,29 @@ class MetaModule(ModuleInterface):
                 db_path = self._get_db_path()
                 backup = check_db_backup_age(db_path)
 
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=DEFAULT_TZ_OFFSET,
-                    source_module="meta.sync",
-                    event_type="backup_status",
-                    value_numeric=(
-                        backup["newest_backup_age_days"]
-                        if backup["newest_backup_age_days"] is not None
-                        else -1.0
-                    ),
-                    value_json=safe_json({
-                        "date": date_str,
-                        "healthy": backup["healthy"],
-                    }),
-                    tags="health,backup",
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        source_module="meta.sync",
+                        event_type="backup_status",
+                        value_numeric=(
+                            backup["newest_backup_age_days"]
+                            if backup["newest_backup_age_days"] is not None
+                            else -1.0
+                        ),
+                        value_json=safe_json(
+                            {
+                                "date": date_str,
+                                "healthy": backup["healthy"],
+                            }
+                        ),
+                        tags="health,backup",
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
                 log.info(f"Backup: {backup['message']}")
             except Exception as e:
                 log.error(f"Backup check failed: {e}", exc_info=True)
@@ -256,22 +274,26 @@ class MetaModule(ModuleInterface):
                 if api_key:
                     relay = verify_syncthing_relay(api_key)
                     severity = "critical" if relay.get("relay_enabled") else "info"
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
-                        source_module="meta.sync",
-                        event_type="relay_check",
-                        value_text=relay["message"],
-                        value_json=safe_json({
-                            "date": date_str,
-                            "healthy": relay["healthy"],
-                            "relay_enabled": relay["relay_enabled"],
-                        }),
-                        tags=f"health,security,{severity}",
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=DEFAULT_TZ_OFFSET,
+                            source_module="meta.sync",
+                            event_type="relay_check",
+                            value_text=relay["message"],
+                            value_json=safe_json(
+                                {
+                                    "date": date_str,
+                                    "healthy": relay["healthy"],
+                                    "relay_enabled": relay["relay_enabled"],
+                                }
+                            ),
+                            tags=f"health,security,{severity}",
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
                     log.info(f"Relay: {relay['message']}")
                 else:
                     log.info("Relay check skipped — no Syncthing API key configured")
@@ -281,17 +303,13 @@ class MetaModule(ModuleInterface):
         # --- Insert all meta events ---
         if events:
             try:
-                inserted, skipped = db.insert_events_for_module(
-                    "meta", events
-                )
+                inserted, skipped = db.insert_events_for_module("meta", events)
                 log.info(
                     f"Meta module: {inserted} health events recorded "
                     f"({skipped} skipped)"
                 )
             except Exception as e:
-                log.error(
-                    f"Failed to insert meta events: {e}", exc_info=True
-                )
+                log.error(f"Failed to insert meta events: {e}", exc_info=True)
 
     def get_daily_summary(self, db, date_str: str) -> dict | None:
         """Return meta health metrics for report generation."""
@@ -348,15 +366,11 @@ class MetaModule(ModuleInterface):
 
     def _get_raw_base(self) -> str:
         """Get raw_base path from config or default."""
-        return self._config.get(
-            "_raw_base", "~/LifeData/raw/LifeData"
-        )
+        return self._config.get("_raw_base", "~/LifeData/raw/LifeData")
 
     def _get_db_path(self) -> str:
         """Get db_path from config or default."""
-        return self._config.get(
-            "_db_path", "~/LifeData/db/lifedata.db"
-        )
+        return self._config.get("_db_path", "~/LifeData/db/lifedata.db")
 
 
 def create_module(config: dict | None = None) -> MetaModule:

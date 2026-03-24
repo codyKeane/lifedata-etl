@@ -16,8 +16,6 @@ CSV Formats (refactored Tasker tasks):
   Evening (manual):   epoch,date,time,day_rating,stress,productivity,social,manual
 """
 
-import json
-import os
 from typing import Optional
 
 from core.event import Event
@@ -112,58 +110,66 @@ def parse_morning(file_path: str) -> list[Event]:
                     "energy": energy,
                     "source": source_tag,
                 }
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="mind.morning",
-                    event_type="assessment",
-                    value_json=safe_json(assessment),
-                    tags=tags,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="mind.morning",
+                        event_type="assessment",
+                        value_json=safe_json(assessment),
+                        tags=tags,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
                 # --- Individual score events ---
                 if sleep_quality is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.sleep",
-                        event_type="check_in",
-                        value_numeric=sleep_quality,
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.sleep",
+                            event_type="check_in",
+                            value_numeric=sleep_quality,
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
                 if mood is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.mood",
-                        event_type="check_in",
-                        value_numeric=mood,
-                        value_text="morning",
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.mood",
+                            event_type="check_in",
+                            value_numeric=mood,
+                            value_text="morning",
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
                 if energy is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.energy",
-                        event_type="check_in",
-                        value_numeric=energy,
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.energy",
+                            event_type="check_in",
+                            value_numeric=energy,
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")
@@ -221,71 +227,81 @@ def parse_evening(file_path: str) -> list[Event]:
                     "social_satisfaction": social_satisfaction,
                     "source": source_tag,
                 }
-                events.append(Event(
-                    timestamp_utc=ts_utc,
-                    timestamp_local=ts_local,
-                    timezone_offset=tz_offset,
-                    source_module="mind.evening",
-                    event_type="assessment",
-                    value_json=safe_json(assessment),
-                    tags=tags,
-                    confidence=1.0,
-                    parser_version=PARSER_VERSION,
-                ))
+                events.append(
+                    Event(
+                        timestamp_utc=ts_utc,
+                        timestamp_local=ts_local,
+                        timezone_offset=tz_offset,
+                        source_module="mind.evening",
+                        event_type="assessment",
+                        value_json=safe_json(assessment),
+                        tags=tags,
+                        confidence=1.0,
+                        parser_version=PARSER_VERSION,
+                    )
+                )
 
                 # --- Individual score events ---
                 if day_rating is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.mood",
-                        event_type="check_in",
-                        value_numeric=day_rating,
-                        value_text="evening",
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.mood",
+                            event_type="check_in",
+                            value_numeric=day_rating,
+                            value_text="evening",
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
                 if stress is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.stress",
-                        event_type="check_in",
-                        value_numeric=stress,
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.stress",
+                            event_type="check_in",
+                            value_numeric=stress,
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
                 if productivity is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.productivity",
-                        event_type="check_in",
-                        value_numeric=productivity,
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.productivity",
+                            event_type="check_in",
+                            value_numeric=productivity,
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
                 if social_satisfaction is not None:
-                    events.append(Event(
-                        timestamp_utc=ts_utc,
-                        timestamp_local=ts_local,
-                        timezone_offset=tz_offset,
-                        source_module="mind.social_satisfaction",
-                        event_type="check_in",
-                        value_numeric=social_satisfaction,
-                        tags=tags,
-                        confidence=1.0,
-                        parser_version=PARSER_VERSION,
-                    ))
+                    events.append(
+                        Event(
+                            timestamp_utc=ts_utc,
+                            timestamp_local=ts_local,
+                            timezone_offset=tz_offset,
+                            source_module="mind.social_satisfaction",
+                            event_type="check_in",
+                            value_numeric=social_satisfaction,
+                            tags=tags,
+                            confidence=1.0,
+                            parser_version=PARSER_VERSION,
+                        )
+                    )
 
             except Exception as e:
                 log.warning(f"{file_path}:{line_num}: parse error: {e}")

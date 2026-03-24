@@ -39,6 +39,9 @@ lifedata:
       - social
       - media
       - meta
+      - cognition
+      - behavior
+      - oracle
 
   # ──────────────────────────────────────────────────────────
   # Module configuration
@@ -52,8 +55,8 @@ lifedata:
       weather_api_key: "${WEATHER_API_KEY}"
       airnow_api_key: "${AIRNOW_API_KEY}"
       ambee_api_key: "${AMBEE_API_KEY}"
-      home_lat: 0.0
-      home_lon: 0.0
+      home_lat: "${HOME_LAT}"
+      home_lon: "${HOME_LON}"
       seismic_radius_km: 500
       emf_sample_interval_sec: 30
       sound_sample_interval_min: 10
@@ -84,7 +87,7 @@ lifedata:
           url: "https://hnrss.org/frontpage"
           category: "technology"
         - name: "Nature News"
-          url: "http://feeds.nature.com/nature/rss/current"
+          url: "https://feeds.nature.com/nature/rss/current"
           category: "science"
 
     social:
@@ -112,6 +115,19 @@ lifedata:
 
     meta:
       enabled: true
+
+    cognition:
+      enabled: true
+      simple_rt_trials: 3
+      choice_rt_trials: 5
+      gonogo_trials: 10
+      digit_span_start: 3
+      digit_span_max_trials: 8
+      time_production_targets: [5, 10, 15, 30]
+      typing_prompt_pool_size: 10
+      passive_typing_enabled: false
+      impairment_zscore_threshold: 2.0
+      baseline_window_days: 14
       completeness_check: true
       quality_check: true
       storage_check: true
@@ -123,6 +139,34 @@ lifedata:
       alert_on_critical: true
       kde_connect_alerts: false
       archive_threshold_gb: 10
+
+    behavior:
+      enabled: true
+      fragmentation_ceiling: 60
+      min_dwell_sec: 1
+      max_dwell_sec: 3600
+      min_latency_ms: 200
+      max_latency_ms: 30000
+      step_goal: 8000
+      sedentary_threshold: 50
+      sedentary_min_bout_hours: 2
+      baseline_window_days: 14
+      restlessness_threshold: 2.0
+
+    oracle:
+      enabled: true
+      home_lat: "${HOME_LAT}"
+      home_lon: "${HOME_LON}"
+      analysis_window_days: 90
+      iching_default_method: "coin"
+      auto_daily_casting: true
+      store_raw_question: false
+      rng_sample_interval_min: 30
+      rng_batch_size: 100
+      schumann_enabled: true
+      schumann_fetch_interval_hours: 1
+      planetary_hours_enabled: true
+      planetary_hours_tag_events: true
 
   # ──────────────────────────────────────────────────────────
   # Analysis settings
@@ -149,6 +193,17 @@ lifedata:
       - world.news_sentiment
       - world.fear_composite
       - device.screen_time
+      # Cognition metrics (Phase 1)
+      - cognition.reaction
+      - cognition.memory
+      - cognition.derived
+      # Behavior metrics (Phase 2)
+      - behavior.app_switch
+      - behavior.steps
+      - behavior.derived
+      # Oracle metrics (Phase 3)
+      - oracle.rng
+      - oracle.schumann
 
   # ──────────────────────────────────────────────────────────
   # Data retention

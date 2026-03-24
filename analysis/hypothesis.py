@@ -6,8 +6,6 @@ Formal hypothesis testing using collected data.
 Pre-defines the key research questions of the LifeData project.
 """
 
-from typing import Optional
-
 from analysis.correlator import Correlator
 from core.logger import get_logger
 
@@ -46,9 +44,7 @@ class HypothesisTest:
         hypothesis is supported by the data.
         """
         corr = Correlator(db)
-        result = corr.correlate(
-            self.metric_a, self.metric_b, window_days=window_days
-        )
+        result = corr.correlate(self.metric_a, self.metric_b, window_days=window_days)
 
         if "error" in result:
             return {
@@ -93,33 +89,64 @@ class HypothesisTest:
 HYPOTHESES = [
     HypothesisTest(
         "Geomagnetic storms reduce mood",
-        "environment.geomagnetic", "mind.mood",
+        "environment.geomagnetic",
+        "mind.mood",
         direction="negative",
     ),
     HypothesisTest(
         "Morning light exposure improves energy",
-        "environment.hourly", "mind.energy",
+        "environment.hourly",
+        "mind.energy",
         direction="positive",
     ),
     HypothesisTest(
         "Afternoon caffeine disrupts sleep",
-        "body.caffeine", "body.sleep_quality",
+        "body.caffeine",
+        "body.sleep_quality",
         direction="negative",
     ),
     HypothesisTest(
         "Social interaction improves next-day mood",
-        "social.density_score", "mind.mood",
+        "social.density_score",
+        "mind.mood",
         direction="positive",
     ),
     HypothesisTest(
         "High notification volume reduces focus",
-        "social.notification", "mind.focus",
+        "social.notification",
+        "mind.focus",
         direction="negative",
     ),
     HypothesisTest(
         "Negative news sentiment predicts lower mood",
-        "world.news_sentiment", "mind.mood",
+        "world.news_sentiment",
+        "mind.mood",
         direction="positive",
+    ),
+    # ── Cognition hypotheses ──
+    HypothesisTest(
+        "Caffeine improves reaction time within 2 hours",
+        "body.caffeine",
+        "cognition.reaction",
+        direction="negative",  # lower RT = better, caffeine should reduce RT
+    ),
+    HypothesisTest(
+        "Sleep deprivation impairs cognitive load index",
+        "body.sleep",
+        "cognition.derived",
+        direction="negative",  # less sleep → higher CLI (more impaired)
+    ),
+    HypothesisTest(
+        "High stress correlates with impaired working memory",
+        "mind.stress",
+        "cognition.memory",
+        direction="negative",  # higher stress → lower digit span
+    ),
+    HypothesisTest(
+        "Morning cognition scores predict self-reported productivity",
+        "cognition.reaction",
+        "mind.focus",
+        direction="negative",  # lower RT (better cognition) → higher focus rating
     ),
 ]
 

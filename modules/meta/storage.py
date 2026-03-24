@@ -110,6 +110,17 @@ def enforce_retention_policy(config: dict) -> dict:
 
     # Prune old raw files
     raw_base = os.path.expanduser(ld.get("raw_base", "~/LifeData/raw"))
+
+    # Safety check: refuse to run retention on suspiciously short paths
+    # to prevent accidental deletion of system files from misconfiguration
+    raw_real = os.path.realpath(raw_base)
+    if len(raw_real.split(os.sep)) < 4 or "LifeData" not in raw_real:
+        log.error(
+            f"Retention policy refused: raw_base '{raw_real}' looks unsafe "
+            f"(must be at least 4 levels deep and contain 'LifeData')"
+        )
+        return summary
+
     if os.path.isdir(raw_base):
         for root, _dirs, files in os.walk(raw_base):
             for f in files:

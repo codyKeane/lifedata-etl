@@ -14,9 +14,14 @@
 
 # Secrets — NEVER commit
 .env
+*.env*
+
+# ETL lockfile (flock-based, prevents concurrent runs)
+.etl.lock
 
 # Database — contains all personal data
-db/
+db/*.db
+db/backups/
 
 # Raw data — Syncthing landing zone
 raw/
@@ -37,6 +42,14 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+
+# Type checking / linting / testing caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Packaging
+*.egg-info/
 
 # IDE / editor files
 .vscode/
@@ -59,8 +72,17 @@ cron_test.txt
 
 # Claude & Guides
 USER_GUIDE.md
-CLAUDE.md
 .claude
 
 # Git commands
 git_commands.md
+
+# Action plan
+CLAUDE_GO.md
+
+# Syncthing metadata
+.stfolder/
+.stignore
+
+# ETL log (ephemeral)
+etl.log

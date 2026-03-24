@@ -1,0 +1,18 @@
+# LifeData V4 — Development Dependencies
+# ──────────────────────────────────────────────────────────────
+# Install: pip install -r requirements-dev.txt
+# Includes runtime deps + test/lint/format tools.
+# ──────────────────────────────────────────────────────────────
+
+-r requirements.txt
+
+# Testing
+pytest==9.0.2                 # test runner
+pytest_tmp_files==0.0.2       # temporary file fixtures
+
+# Linting
+ruff==0.11.4                  # fast linter + formatter (replaces flake8/isort/black)
+pyright==1.1.398              # static type checker
+
+# Debugging
+Pygments==2.19.2              # syntax highlighting for tracebacks

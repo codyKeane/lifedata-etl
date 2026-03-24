@@ -34,19 +34,38 @@ class AnomalyDetector:
         return [row[0] for row in rows]
 
     def _get_daily_metric(
-        self, source_module: str, date_str: str
+        self,
+        source_module: str,
+        date_str: str,
+        event_type: Optional[str] = None,
+        aggregate: str = "AVG",
     ) -> Optional[float]:
-        """Get the average value_numeric for a metric on a specific date."""
-        row = self.db.conn.execute(
-            """
-            SELECT AVG(value_numeric)
+        """Get an aggregated value_numeric for a metric on a specific date.
+
+        Args:
+            source_module: The source module to query.
+            date_str: Date string (YYYY-MM-DD).
+            event_type: Optional event_type filter.
+            aggregate: SQL aggregate function (AVG, SUM, MIN, MAX, COUNT).
+        """
+        allowed_aggs = {"AVG", "SUM", "MIN", "MAX", "COUNT"}
+        if aggregate.upper() not in allowed_aggs:
+            aggregate = "AVG"
+
+        query = f"""
+            SELECT {aggregate.upper()}(value_numeric)
             FROM events
             WHERE source_module = ?
               AND date(timestamp_local) = ?
               AND value_numeric IS NOT NULL
-            """,
-            [source_module, date_str],
-        ).fetchone()
+        """
+        params: list = [source_module, date_str]
+
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+
+        row = self.db.conn.execute(query, params).fetchone()
         return row[0] if row and row[0] is not None else None
 
     def _get_metric_history(
@@ -59,9 +78,9 @@ class AnomalyDetector:
 
         Excludes a specific date (usually today) from the baseline.
         """
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%d"
+        )
 
         query = """
             SELECT date(timestamp_local) as day, AVG(value_numeric) as avg_val
@@ -94,9 +113,7 @@ class AnomalyDetector:
             if today_value is None:
                 continue
 
-            baseline = self._get_metric_history(
-                metric, days=14, exclude_date=date_str
-            )
+            baseline = self._get_metric_history(metric, days=14, exclude_date=date_str)
             if len(baseline) < 3:
                 # Not enough history for meaningful anomaly detection
                 continue
@@ -159,11 +176,220 @@ class AnomalyDetector:
                     }
                 )
 
+        # Pattern: Sleep deprivation + high stress
+        sleep_dur = self._get_daily_metric(
+            "body.derived", date_str, event_type="sleep_duration"
+        )
+        stress = self._get_daily_metric("mind.stress", date_str)
+        if sleep_dur is not None and stress is not None:
+            if sleep_dur < 6.0 and stress > 6:
+                patterns.append(
+                    {
+                        "pattern": "sleep_deprivation_high_stress",
+                        "description": (
+                            f"Short sleep ({sleep_dur:.1f}h) combined with "
+                            f"high stress ({stress:.0f}/10) — burnout risk"
+                        ),
+                        "metrics": {
+                            "sleep_hours": sleep_dur,
+                            "stress_level": stress,
+                        },
+                    }
+                )
+
+        # Pattern: Late caffeine + fragmented sleep
+        late_caffeine = self._get_late_caffeine(date_str)
+        sleep_quality = self._get_daily_metric("mind.sleep", date_str)
+        if late_caffeine is not None and sleep_quality is not None:
+            if late_caffeine > 0 and sleep_quality < 5:
+                patterns.append(
+                    {
+                        "pattern": "caffeine_late_poor_sleep",
+                        "description": (
+                            f"Caffeine intake after 14:00 ({late_caffeine:.0f}mg) "
+                            f"with poor sleep quality ({sleep_quality:.0f}/10)"
+                        ),
+                        "metrics": {
+                            "late_caffeine_mg": late_caffeine,
+                            "sleep_quality": sleep_quality,
+                        },
+                    }
+                )
+
+        # Pattern: Low mood + social isolation
+        mood = self._get_daily_metric("mind.mood", date_str)
+        density = self._get_daily_metric(
+            "social.derived", date_str, event_type="density_score"
+        )
+        if mood is not None and density is not None:
+            if mood < 4 and density < 10:
+                patterns.append(
+                    {
+                        "pattern": "low_mood_social_isolation",
+                        "description": (
+                            f"Low mood ({mood:.0f}/10) with minimal social "
+                            f"interaction (density={density:.1f})"
+                        ),
+                        "metrics": {
+                            "mood": mood,
+                            "social_density": density,
+                        },
+                    }
+                )
+
+        # Pattern: High screen time + low steps
+        screen_time = self._get_daily_metric(
+            "device.derived", date_str, event_type="screen_time_minutes"
+        )
+        steps = self._get_daily_metric("body.steps", date_str, aggregate="SUM")
+        if screen_time is not None and steps is not None:
+            if screen_time > 180 and steps < 3000:
+                patterns.append(
+                    {
+                        "pattern": "high_screen_low_movement",
+                        "description": (
+                            f"High screen time ({screen_time:.0f} min) with "
+                            f"low step count ({steps:.0f}) — sedentary day"
+                        ),
+                        "metrics": {
+                            "screen_time_min": screen_time,
+                            "steps": steps,
+                        },
+                    }
+                )
+
+        # Pattern: High cognitive load after sleep deprivation (cognition × body)
+        cli = self._get_daily_metric(
+            "cognition.derived", date_str, event_type="cognitive_load_index"
+        )
+        sleep_cog = self._get_daily_metric(
+            "body.derived", date_str, event_type="sleep_duration"
+        )
+        if cli is not None and sleep_cog is not None:
+            if cli > 2.0 and sleep_cog < 6.0:
+                patterns.append(
+                    {
+                        "pattern": "cognitive_impairment_sleep_deprivation",
+                        "description": (
+                            f"High cognitive impairment (CLI={cli:.1f}) "
+                            f"after short sleep ({sleep_cog:.1f}h)"
+                        ),
+                        "metrics": {
+                            "cognitive_load_index": cli,
+                            "sleep_hours": sleep_cog,
+                        },
+                    }
+                )
+
+        # Pattern: Digital restlessness with low mood (behavior × mind)
+        restlessness = self._get_daily_metric(
+            "behavior.derived", date_str, event_type="digital_restlessness"
+        )
+        mood_rest = self._get_daily_metric("mind.mood", date_str)
+        if restlessness is not None and mood_rest is not None:
+            if restlessness > 2.0 and mood_rest < 4:
+                patterns.append(
+                    {
+                        "pattern": "digital_restlessness_low_mood",
+                        "description": (
+                            f"Digital restlessness (z={restlessness:.1f}) "
+                            f"with low mood ({mood_rest:.0f}/10)"
+                        ),
+                        "metrics": {
+                            "digital_restlessness": restlessness,
+                            "mood": mood_rest,
+                        },
+                    }
+                )
+
+        # Pattern: Schumann resonance deviation with mood swing (oracle × mind)
+        schumann_mean = self._get_schumann_mean(date_str)
+        mood_range = self._get_mood_range(date_str)
+        if schumann_mean is not None and mood_range is not None:
+            if abs(schumann_mean - 7.83) > 0.3 and mood_range > 4:
+                patterns.append(
+                    {
+                        "pattern": "schumann_excursion_mood_swing",
+                        "description": (
+                            f"Schumann resonance deviation ({schumann_mean:.2f} Hz) "
+                            f"with wide mood swing (range={mood_range:.0f})"
+                        ),
+                        "metrics": {
+                            "schumann_mean_hz": schumann_mean,
+                            "mood_range": mood_range,
+                        },
+                    }
+                )
+
+        # Pattern: High app fragmentation with heavy caffeine (behavior × body)
+        frag = self._get_daily_metric(
+            "behavior.app_switch.derived", date_str, event_type="fragmentation_index"
+        )
+        caffeine_total = self._get_daily_metric(
+            "body.caffeine", date_str, aggregate="SUM"
+        )
+        if frag is not None and caffeine_total is not None:
+            if frag > 50 and caffeine_total > 300:
+                patterns.append(
+                    {
+                        "pattern": "fragmentation_caffeine_spike",
+                        "description": (
+                            f"High app fragmentation ({frag:.0f}) "
+                            f"with heavy caffeine ({caffeine_total:.0f}mg)"
+                        ),
+                        "metrics": {
+                            "fragmentation_index": frag,
+                            "caffeine_mg": caffeine_total,
+                        },
+                    }
+                )
+
         return patterns
 
-    def _count_events(
-        self, source_module: str, date_str: str
-    ) -> Optional[int]:
+    def _get_schumann_mean(self, date_str: str) -> float | None:
+        """Get mean Schumann resonance frequency for a given date."""
+        row = self.db.conn.execute(
+            """
+            SELECT AVG(value_numeric) FROM events
+            WHERE source_module = 'oracle.schumann'
+              AND value_numeric IS NOT NULL
+              AND date(timestamp_local) = ?
+            """,
+            [date_str],
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def _get_mood_range(self, date_str: str) -> float | None:
+        """Get mood range (max - min) for a given date."""
+        row = self.db.conn.execute(
+            """
+            SELECT MIN(value_numeric), MAX(value_numeric) FROM events
+            WHERE source_module = 'mind.mood'
+              AND value_numeric IS NOT NULL
+              AND date(timestamp_local) = ?
+            """,
+            [date_str],
+        ).fetchone()
+        if row and row[0] is not None and row[1] is not None:
+            return row[1] - row[0]
+        return None
+
+    def _get_late_caffeine(self, date_str: str) -> float | None:
+        """Get total caffeine intake after 14:00 local time on a given date."""
+        row = self.db.conn.execute(
+            """
+            SELECT SUM(value_numeric) FROM events
+            WHERE source_module = 'body.caffeine'
+              AND event_type = 'intake'
+              AND value_numeric IS NOT NULL
+              AND date(timestamp_local) = ?
+              AND CAST(strftime('%H', timestamp_local) AS INTEGER) >= 14
+            """,
+            [date_str],
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def _count_events(self, source_module: str, date_str: str) -> Optional[int]:
         """Count events for a metric on a specific date."""
         row = self.db.conn.execute(
             """
@@ -177,9 +403,7 @@ class AnomalyDetector:
         return row[0] if row else None
 
     @staticmethod
-    def _describe(
-        metric: str, zscore: float, value: float, mean: float
-    ) -> str:
+    def _describe(metric: str, zscore: float, value: float, mean: float) -> str:
         """Generate a human-readable anomaly description."""
         direction = "above" if zscore > 0 else "below"
         return (

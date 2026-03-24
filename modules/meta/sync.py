@@ -72,9 +72,7 @@ def check_sync_lag(raw_base: str) -> dict:
     }
 
 
-def check_db_backup_age(
-    db_path: str, max_age_days: int = 1
-) -> dict:
+def check_db_backup_age(db_path: str, max_age_days: int = 1) -> dict:
     """Verify a recent database backup exists.
 
     Args:
@@ -84,9 +82,7 @@ def check_db_backup_age(
     Returns:
         Dict with healthy status and backup age details.
     """
-    backup_dir = os.path.join(
-        os.path.dirname(os.path.expanduser(db_path)), "backups"
-    )
+    backup_dir = os.path.join(os.path.dirname(os.path.expanduser(db_path)), "backups")
 
     if not os.path.isdir(backup_dir):
         return {
@@ -96,8 +92,7 @@ def check_db_backup_age(
         }
 
     backup_files = [
-        f for f in os.listdir(backup_dir)
-        if os.path.isfile(os.path.join(backup_dir, f))
+        f for f in os.listdir(backup_dir) if os.path.isfile(os.path.join(backup_dir, f))
     ]
 
     if not backup_files:
@@ -107,10 +102,7 @@ def check_db_backup_age(
             "message": "No backups found in backup directory.",
         }
 
-    newest = max(
-        os.path.getmtime(os.path.join(backup_dir, f))
-        for f in backup_files
-    )
+    newest = max(os.path.getmtime(os.path.join(backup_dir, f)) for f in backup_files)
     age_days = (time.time() - newest) / 86400
 
     healthy = age_days <= max_age_days
