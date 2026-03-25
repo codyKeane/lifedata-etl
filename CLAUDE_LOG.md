@@ -1,5 +1,30 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-25 — Type Hints Audit (no changes needed)
+
+**Task:** Analyze the type-hints directives against the current codebase.
+
+**Analysis:** All directives were already fully implemented in commit `72843dd`. Point-by-point:
+
+| Directive | Status | Evidence |
+|---|---|---|
+| core/event.py typed | Done | `to_db_tuple()` returns full 17-element typed tuple |
+| core/database.py typed | Done | `Sequence[object]` params, typed `__enter__`/`__exit__`, parameterized generics |
+| core/orchestrator.py typed | Done | `run() -> dict[str, object]`, pydantic `RootConfig` already used |
+| core/utils.py typed | Done | `safe_float(value: object)`, `safe_int(value: object)`, `safe_json(obj: object)` |
+| core/config.py typed | Done | `re.Match[str]`, env-var resolution typed |
+| core/metrics.py typed | Done | `dict[str, Any]` on all serialization methods |
+| core/parser_utils.py callback typed | Done | `Callable[[list[str], int], Optional[Event \| list[Event]]]` |
+| modules module.py typed | Done | All 11 modules: `TYPE_CHECKING` guard, `post_ingest(db: Database)`, etc. |
+| modules parsers.py typed | Done | 6 parsers files + `dict[str, Any]` annotations |
+| `mypy --strict core/` passes | Done | 0 errors, 12 files |
+| `mypy modules/` passes | Done | 0 errors, 38 files |
+| tests/test_static.py CI gate | Done | 2 tests: `test_mypy_strict_core`, `test_mypy_modules` |
+
+**Result:** No code changes necessary. Full test suite: 605/605 passed in 2.11s.
+
+---
+
 ## 2026-03-25 — Comprehensive Type Hints, mypy Strict Passing
 
 **Task:** Add comprehensive type hints across core/ and modules/, run mypy --strict on core/ and mypy on modules/ with zero errors, create CI gate test.
