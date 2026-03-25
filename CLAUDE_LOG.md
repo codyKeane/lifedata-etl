@@ -1,5 +1,24 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Reliability Mechanisms Audit (no changes needed)
+
+**Task:** Analyze the three reliability directives (lockfile, file stability, parser degradation) against the current codebase and determine if changes are needed.
+
+**Analysis:** All three mechanisms were already fully implemented in the prior session. Point-by-point comparison against the directives:
+
+| Directive | File(s) | Status | Notes |
+|---|---|---|---|
+| Lockfile: `fcntl.flock`, 5s timeout, exit(1), exact message | `run_etl.py:33-68` | Matches | Retry loop at 0.25s intervals, PID written, crash-safe |
+| File stability: configurable `etl.file_stability_seconds`, INFO log format `[module_id] Skipping unstable file (modified Xs ago): path` | `orchestrator.py:185,214-228`, `config_schema.py:351-359`, `config.yaml:172-177` | Matches | `EtlConfig` pydantic model, range 0-600, wired through orchestrator |
+| Parser degradation: `safe_parse_rows(filepath, parse_fn, module_id)`, per-row try/except, log file/line/raw(200)/exception, >50% quarantine | `core/parser_utils.py` | Matches | Returns `ParseResult` dataclass (richer than directive's tuple — includes `total_rows`, `filepath`) |
+| Device parsers refactored as reference implementation | `modules/device/parsers.py` | Matches | All 4 parsers use `safe_parse_rows`, both `PARSER_REGISTRY` and `SAFE_PARSER_REGISTRY` exposed |
+| Orchestrator includes quarantined files in summary | `orchestrator.py:274-281,355` | Matches | `quarantined_files` key in run summary dict |
+| Tests for all three mechanisms | `tests/test_reliability.py` (29 tests) | Matches | Lockfile (4), stability config (7), safe_parse_rows (11), device refactor (7) |
+
+**Result:** No code changes necessary. Full test suite: 538/538 passed in 1.80s.
+
+---
+
 ## 2026-03-24 — Reliability Mechanisms: Lockfile, File Stability, Parser Degradation
 
 **Task:** Implement three reliability mechanisms in the ETL pipeline and test them.
