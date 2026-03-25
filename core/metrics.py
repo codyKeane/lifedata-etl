@@ -11,8 +11,7 @@ import json
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -28,7 +27,7 @@ class ModuleMetrics:
     events_ingested: int = 0
     events_skipped: int = 0
     duration_sec: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

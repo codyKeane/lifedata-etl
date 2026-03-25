@@ -8,13 +8,11 @@ with SAVEPOINT isolation.
 """
 
 import importlib
-import json
 import os
 import shutil
-import stat
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.config import load_config
@@ -282,7 +280,7 @@ class Orchestrator:
             return {"total_events": 0, "failed_modules": [], "modules_run": 0}
 
         metrics = ETLMetrics(
-            started_utc=datetime.now(timezone.utc).isoformat(),
+            started_utc=datetime.now(UTC).isoformat(),
         )
         run_start = time.time()
         all_quarantined: list[str] = []
@@ -395,7 +393,7 @@ class Orchestrator:
                 # undo successfully inserted events)
                 if not dry_run:
                     try:
-                        module.post_ingest(self.db)
+                        module.post_ingest(self.db, self.db.get_affected_dates())
                     except Exception as e:
                         log.error(
                             f"[{module.module_id}] post_ingest() failed: {e}",
@@ -427,7 +425,7 @@ class Orchestrator:
 
         # Aggregate totals from per-module metrics
         metrics.duration_sec = round(time.time() - run_start, 2)
-        metrics.finished_utc = datetime.now(timezone.utc).isoformat()
+        metrics.finished_utc = datetime.now(UTC).isoformat()
         metrics.total_events_parsed = sum(
             m.events_parsed for m in metrics.modules.values()
         )

@@ -24,7 +24,7 @@ import math
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 # Add project root to path for config loading
@@ -70,7 +70,7 @@ def ns_to_window_key(ns_timestamp: int, window_min: int) -> int:
 
 def epoch_to_local(epoch_sec: float, tz_offset: str = DEFAULT_TZ_OFFSET) -> tuple:
     """Convert epoch seconds to (date_str, time_str, utc_iso, local_iso)."""
-    dt_utc = datetime.fromtimestamp(epoch_sec, tz=timezone.utc)
+    dt_utc = datetime.fromtimestamp(epoch_sec, tz=UTC)
 
     # Parse offset
     try:
@@ -137,7 +137,7 @@ def _stream_csv(filepath: str):
     Handles the Sensor Logger format where the first column is a nanosecond
     timestamp and the header row defines column names.
     """
-    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+    with open(filepath, encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
@@ -385,7 +385,7 @@ def _read_session_metadata(session_dir: str) -> dict:
     if not os.path.exists(meta_path):
         return meta
 
-    with open(meta_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(meta_path, encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
         for row in reader:
             tz_str = row.get("recording timezone", "").strip()
@@ -394,8 +394,8 @@ def _read_session_metadata(session_dir: str) -> dict:
             elif tz_str:
                 # Try to resolve IANA to offset
                 try:
-                    from zoneinfo import ZoneInfo
                     from datetime import datetime as dt
+                    from zoneinfo import ZoneInfo
 
                     tz = ZoneInfo(tz_str)
                     epoch_str = row.get("recording epoch time", "0")

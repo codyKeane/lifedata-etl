@@ -6,8 +6,8 @@ Flags unusual events using z-score analysis against rolling baselines.
 Also detects multi-variable pattern anomalies (burnout signals, caffeine-sleep).
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+import statistics
+from datetime import UTC, datetime, timedelta
 
 from core.logger import get_logger
 
@@ -37,9 +37,9 @@ class AnomalyDetector:
         self,
         source_module: str,
         date_str: str,
-        event_type: Optional[str] = None,
+        event_type: str | None = None,
         aggregate: str = "AVG",
-    ) -> Optional[float]:
+    ) -> float | None:
         """Get an aggregated value_numeric for a metric on a specific date.
 
         Args:
@@ -72,13 +72,13 @@ class AnomalyDetector:
         self,
         source_module: str,
         days: int = 14,
-        exclude_date: Optional[str] = None,
+        exclude_date: str | None = None,
     ) -> list[float]:
         """Get daily averages for a metric over the past N days.
 
         Excludes a specific date (usually today) from the baseline.
         """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime(
             "%Y-%m-%d"
         )
 
@@ -119,8 +119,6 @@ class AnomalyDetector:
                 continue
 
             # Compute z-score
-            import statistics
-
             mean = statistics.mean(baseline)
             stdev = statistics.stdev(baseline) if len(baseline) > 1 else 0
 
@@ -389,7 +387,7 @@ class AnomalyDetector:
         ).fetchone()
         return row[0] if row and row[0] is not None else None
 
-    def _count_events(self, source_module: str, date_str: str) -> Optional[int]:
+    def _count_events(self, source_module: str, date_str: str) -> int | None:
         """Count events for a metric on a specific date."""
         row = self.db.conn.execute(
             """

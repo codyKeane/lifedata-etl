@@ -66,19 +66,14 @@ Thumbs.db
 *.bak
 *.bak.*
 
-# V3 legacy (keep out of v4 repo)
-lifedata_etl_v3.py
-cron_test.txt
+# V3 legacy (archived to legacy/, not tracked)
+legacy/
 
-# Claude & Guides
-USER_GUIDE.md
+# Claude Code settings
 .claude
 
-# Git commands
-git_commands.md
-
-# Action plan
-CLAUDE_GO.md
+# Coverage reports
+.coverage
 
 # Syncthing metadata
 .stfolder/

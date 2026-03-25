@@ -67,7 +67,7 @@ class MetaModule(ModuleInterface):
         # Meta module doesn't parse files
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Run all health checks after other modules finish.
 
         Each check is gated by its config flag. Errors in individual

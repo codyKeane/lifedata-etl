@@ -123,7 +123,7 @@ def compute_planetary_hours(
 def load_config() -> dict:
     """Load config.yaml from project root."""
     config_path = os.path.join(PROJECT_ROOT, "config.yaml")
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         return yaml.safe_load(f)
 
 

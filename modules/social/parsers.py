@@ -70,7 +70,7 @@ def parse_notifications(file_path: str) -> list[Event]:
     Format: epoch,date,time,app_package,notification_text
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -130,7 +130,7 @@ def parse_calls(file_path: str) -> list[Event]:
     Contact names and phone numbers are hashed for privacy.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -198,7 +198,7 @@ def parse_sms(file_path: str) -> list[Event]:
     Phone numbers are hashed for privacy.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -248,7 +248,7 @@ def parse_app_usage(file_path: str) -> list[Event]:
     The %APP Tasker variable may be unresolved.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -293,7 +293,7 @@ def parse_wifi(file_path: str) -> list[Event]:
     Multi-line WiFi data follows — we only parse the CSV summary line.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         content = f.read()
 
     import re

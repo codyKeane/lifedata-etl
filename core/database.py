@@ -7,12 +7,10 @@ transactions, daily summary support, backup/restore, and query utilities.
 """
 
 import os
-import shutil
 import sqlite3
-from datetime import datetime, timezone
-from types import TracebackType
 from collections.abc import Sequence
-from typing import Optional
+from datetime import UTC, datetime
+from types import TracebackType
 
 from core.event import Event
 from core.logger import get_logger
@@ -54,6 +52,8 @@ CREATE INDEX IF NOT EXISTS idx_events_source_time
     ON events(source_module, timestamp_utc);
 CREATE INDEX IF NOT EXISTS idx_events_tags
     ON events(tags);
+CREATE INDEX IF NOT EXISTS idx_events_date_local
+    ON events(date(timestamp_local));
 
 CREATE TABLE IF NOT EXISTS modules (
     module_id       TEXT PRIMARY KEY,
@@ -116,6 +116,11 @@ CREATE TRIGGER IF NOT EXISTS events_fts_insert AFTER INSERT ON events BEGIN
     INSERT INTO events_fts(event_id, tags, value_text)
     VALUES (new.event_id, new.tags, new.value_text);
 END;
+
+CREATE TRIGGER IF NOT EXISTS events_fts_delete AFTER DELETE ON events BEGIN
+    INSERT INTO events_fts(events_fts, event_id, tags, value_text)
+    VALUES('delete', old.event_id, old.tags, old.value_text);
+END;
 """
 
 INSERT_EVENT_SQL = """
@@ -145,6 +150,16 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA busy_timeout=5000")
+        # synchronous=NORMAL is safe for WAL — only risks loss on OS crash,
+        # not application crash. Reduces fsync overhead significantly.
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        # Increase page cache from default 2000 (~8MB) to 10000 (~40MB).
+        # Reduces disk I/O for repeated queries against the same pages.
+        self.conn.execute("PRAGMA cache_size=-40000")  # negative = KiB
+        # Store temp tables and indexes in memory instead of disk.
+        self.conn.execute("PRAGMA temp_store=MEMORY")
+        # Memory-map the first 30MB of the database file for faster reads.
+        self.conn.execute("PRAGMA mmap_size=30000000")
 
         # Track dates affected during this ETL run for summary recomputation
         self._affected_dates: set[str] = set()
@@ -167,7 +182,7 @@ class Database:
         self.conn.commit()
         log.info("Database schema ensured")
 
-    def backup(self, keep_days: int = 7) -> Optional[str]:
+    def backup(self, keep_days: int = 7) -> str | None:
         """Create a timestamped backup of the database. Prune old backups.
 
         Called BEFORE any writes at ETL startup.
@@ -186,19 +201,26 @@ class Database:
         os.makedirs(backup_dir, exist_ok=True)
         os.chmod(backup_dir, 0o700)
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         backup_path = os.path.join(backup_dir, f"lifedata.db.bak.{today}")
 
         if os.path.exists(backup_path):
             log.info(f"Backup already exists for today: {backup_path}")
             return None
 
-        shutil.copy2(self.db_path, backup_path)
+        # Use SQLite's online backup API instead of shutil.copy2.
+        # This is safe even during WAL checkpointing and guarantees
+        # a consistent snapshot without risking a corrupt copy.
+        backup_conn = sqlite3.connect(backup_path)
+        try:
+            self.conn.backup(backup_conn)
+        finally:
+            backup_conn.close()
         os.chmod(backup_path, 0o600)
         log.info(f"Database backed up to {backup_path}")
 
         # Prune old backups
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         pruned = 0
         for fname in os.listdir(backup_dir):
             fpath = os.path.join(backup_dir, fname)
@@ -236,37 +258,46 @@ class Database:
         safe_name = "".join(c if c.isalnum() else "_" for c in module_id)
         savepoint = f"sp_{safe_name}"
 
-        inserted = 0
+        # Phase 1: Validate all events, separate valid from invalid.
+        # This runs entirely in Python — no DB calls yet.
+        valid_tuples: list[tuple[str, str, str, str, str, str,
+                                 float | None, str | None, str | None, str | None,
+                                 float | None, float | None, str | None, float,
+                                 str, str | None, str]] = []
         skipped = 0
 
+        for event in events:
+            errors = event.validate()
+            if errors:
+                prov = event.provenance or "unknown"
+                log.warning(
+                    f"[{module_id}] Rejected event from {prov}: "
+                    f"{'; '.join(errors)}"
+                )
+                skipped += 1
+                continue
+
+            valid_tuples.append(event.to_db_tuple())
+            log.debug(
+                f"Ingested {event.event_id[:8]} from "
+                f"{event.provenance or 'unknown'}"
+            )
+
+            # Track the date for summary recomputation
+            try:
+                date_str = event.timestamp_local[:10]
+                self._affected_dates.add(date_str)
+            except (TypeError, IndexError):
+                pass
+
+        # Phase 2: Batch insert all valid events in one executemany() call.
+        # This amortizes transaction overhead across the entire batch.
+        inserted = 0
         try:
             self.conn.execute(f"SAVEPOINT {savepoint}")
-
-            for event in events:
-                errors = event.validate()
-                if errors:
-                    prov = event.provenance or "unknown"
-                    log.warning(
-                        f"[{module_id}] Rejected event from {prov}: "
-                        f"{'; '.join(errors)}"
-                    )
-                    skipped += 1
-                    continue
-
-                self.conn.execute(INSERT_EVENT_SQL, event.to_db_tuple())
-                inserted += 1
-                log.debug(
-                    f"Ingested {event.event_id[:8]} from "
-                    f"{event.provenance or 'unknown'}"
-                )
-
-                # Track the date for summary recomputation
-                try:
-                    date_str = event.timestamp_local[:10]
-                    self._affected_dates.add(date_str)
-                except (TypeError, IndexError):
-                    pass
-
+            if valid_tuples:
+                self.conn.executemany(INSERT_EVENT_SQL, valid_tuples)
+                inserted = len(valid_tuples)
             self.conn.execute(f"RELEASE SAVEPOINT {savepoint}")
             self.conn.commit()
 
@@ -295,10 +326,10 @@ class Database:
         display_name: str = "",
         version: str = "",
         success: bool = True,
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         """Update the modules registry with the latest run status."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         status = "success" if success else "failed"
         self.conn.execute(
             """
@@ -318,8 +349,8 @@ class Database:
 
     def count_events(
         self,
-        source_module: Optional[str] = None,
-        date: Optional[str] = None,
+        source_module: str | None = None,
+        date: str | None = None,
     ) -> int:
         """Count events matching optional filters."""
         query = "SELECT COUNT(*) FROM events WHERE 1=1"
@@ -335,18 +366,30 @@ class Database:
 
     def query_events(
         self,
-        source_module: Optional[str] = None,
-        event_type: Optional[str] = None,
-        start_utc: Optional[str] = None,
-        end_utc: Optional[str] = None,
-        date: Optional[str] = None,
+        source_module: str | None = None,
+        event_type: str | None = None,
+        start_utc: str | None = None,
+        end_utc: str | None = None,
+        date: str | None = None,
         min_confidence: float = 0.0,
         limit: int = 1000,
         order: str = "timestamp_utc DESC",
+        cursor: str | None = None,
     ) -> list[dict[str, object]]:
         """Flexible event query with optional filters.
 
-        Returns list of dicts (from sqlite3.Row).
+        Supports cursor-based (keyset) pagination for efficient iteration.
+        The cursor is the event_id of the last event from the previous page.
+        Use it instead of OFFSET for stable, O(1) pagination.
+
+        Args:
+            cursor: event_id from the last row of the previous page.
+                    When set, returns events AFTER this cursor in the
+                    specified order. Pass the last event_id from the
+                    returned list to fetch the next page.
+
+        Returns:
+            List of dicts (from sqlite3.Row).
         """
         query = "SELECT * FROM events WHERE 1=1"
         params: list[object] = []
@@ -381,7 +424,26 @@ class Database:
         if order not in allowed_orders:
             order = "timestamp_utc DESC"
 
-        query += f" ORDER BY {order} LIMIT ?"
+        # Cursor-based pagination: seek past the cursor row
+        if cursor:
+            # Determine sort column and direction
+            parts = order.split()
+            sort_col = parts[0]
+            is_desc = len(parts) > 1 and parts[1] == "DESC"
+
+            # Look up the cursor row's sort value
+            cursor_row = self.conn.execute(
+                f"SELECT {sort_col} FROM events WHERE event_id = ?",
+                [cursor],
+            ).fetchone()
+            if cursor_row and cursor_row[0] is not None:
+                if is_desc:
+                    query += f" AND ({sort_col} < ? OR ({sort_col} = ? AND event_id < ?))"
+                else:
+                    query += f" AND ({sort_col} > ? OR ({sort_col} = ? AND event_id > ?))"
+                params.extend([cursor_row[0], cursor_row[0], cursor])
+
+        query += f" ORDER BY {order}, event_id {'DESC' if 'DESC' in order else 'ASC'} LIMIT ?"
         params.append(limit)
 
         rows = self.conn.execute(query, params).fetchall()
@@ -406,12 +468,25 @@ class Database:
         log.info(f"Executing migration: {sql[:80]}...")
         return self.conn.execute(sql)
 
-    def execute(self, sql: str, params: Optional[Sequence[object]] = None) -> sqlite3.Cursor:
-        """Execute SQL with optional parameters.
+    # Allowed first keywords for read-only queries
+    _ALLOWED_READ_SQL = {"SELECT", "WITH", "EXPLAIN", "PRAGMA"}
 
-        WARNING: This method accepts arbitrary SQL. Callers must validate
-        inputs. For schema migrations, use execute_migration() instead.
+    def execute(self, sql: str, params: Sequence[object] | None = None) -> sqlite3.Cursor:
+        """Execute a read-only SQL query (SELECT, WITH, EXPLAIN, PRAGMA).
+
+        For writes, use insert_events_for_module(), upsert_daily_summary(),
+        or execute_migration(). This restriction prevents modules from
+        accidentally issuing DML through the general query interface.
+
+        Raises:
+            ValueError: If the SQL does not start with a read-only keyword.
         """
+        first_word = sql.strip().split()[0].upper() if sql.strip() else ""
+        if first_word not in self._ALLOWED_READ_SQL:
+            raise ValueError(
+                f"execute() only allows read queries ({', '.join(sorted(self._ALLOWED_READ_SQL))}), "
+                f"got: '{first_word}'. Use a dedicated write method instead."
+            )
         if params:
             return self.conn.execute(sql, params)
         return self.conn.execute(sql)
@@ -421,8 +496,8 @@ class Database:
         date_local: str,
         source_module: str,
         metric_name: str,
-        value_numeric: Optional[float] = None,
-        value_json: Optional[str] = None,
+        value_numeric: float | None = None,
+        value_json: str | None = None,
     ) -> None:
         """Insert or update a daily summary metric."""
         self.conn.execute(
@@ -448,8 +523,8 @@ class Database:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         self.close()

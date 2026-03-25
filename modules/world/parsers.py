@@ -10,7 +10,7 @@ Parses JSON files produced by the fetch scripts in scripts/:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.event import Event
 from core.logger import get_logger
@@ -28,12 +28,12 @@ def _iso_to_utc_local(iso_str: str) -> tuple[str, str]:
     Falls back to parse_timestamp if ISO parsing fails.
     """
     if not iso_str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return now.isoformat(), now.isoformat()
     try:
         return parse_timestamp(iso_str, DEFAULT_TZ_OFFSET)
     except (ValueError, TypeError):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return now.isoformat(), now.isoformat()
 
 
@@ -54,7 +54,7 @@ def parse_news_json(file_path: str) -> list[Event]:
     """
     events = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             articles = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"Failed to read {file_path}: {e}")
@@ -112,7 +112,7 @@ def parse_markets_json(file_path: str) -> list[Event]:
     """
     events = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             indicators = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"Failed to read {file_path}: {e}")
@@ -166,7 +166,7 @@ def parse_rss_json(file_path: str) -> list[Event]:
     """
     events = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             articles = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"Failed to read {file_path}: {e}")
@@ -223,7 +223,7 @@ def parse_gdelt_json(file_path: str) -> list[Event]:
     """
     events = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             articles = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"Failed to read {file_path}: {e}")

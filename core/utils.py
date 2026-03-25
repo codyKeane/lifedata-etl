@@ -9,8 +9,7 @@ and JSON serialization. Used by all modules and the orchestrator.
 import glob
 import json
 import os
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime, timezone
 from zoneinfo import ZoneInfo
 
 
@@ -45,12 +44,12 @@ def parse_timestamp(
         # If >10 digits, assume milliseconds
         if epoch > 9_999_999_999:
             epoch = epoch // 1000
-        dt_utc = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        dt_utc = datetime.fromtimestamp(epoch, tz=UTC)
     elif "T" in raw and ("+" in raw[10:] or raw.endswith("Z") or "-" in raw[10:]):
         # ISO 8601 with timezone info
         if raw.endswith("Z"):
             raw = raw[:-1] + "+00:00"
-        dt_utc = datetime.fromisoformat(raw).astimezone(timezone.utc)
+        dt_utc = datetime.fromisoformat(raw).astimezone(UTC)
     else:
         # Assume local datetime string — use tz_offset to determine UTC
         try:
@@ -68,13 +67,13 @@ def parse_timestamp(
         except ValueError:
             try:
                 dt_local = datetime.strptime(raw, "%Y-%m-%d %H:%M")
-            except ValueError:
+            except ValueError as e:
                 raise ValueError(
                     f"Cannot parse timestamp: '{raw}' "
                     f"(tried epoch, ISO 8601, and local datetime formats)"
-                )
+                ) from e
         dt_local = dt_local.replace(tzinfo=tz_info)
-        dt_utc = dt_local.astimezone(timezone.utc)
+        dt_utc = dt_local.astimezone(UTC)
 
     # Compute local time from UTC using the provided offset
     local_dt = _utc_to_local(dt_utc, tz_offset)
@@ -155,7 +154,7 @@ def glob_files(
     return sorted(files)
 
 
-def safe_float(value: object) -> Optional[float]:
+def safe_float(value: object) -> float | None:
     """Parse a value to float, returning None on failure.
 
     Handles strings, ints, floats, and None gracefully.
@@ -173,7 +172,7 @@ def safe_float(value: object) -> Optional[float]:
         return None
 
 
-def safe_int(value: object) -> Optional[int]:
+def safe_int(value: object) -> int | None:
     """Parse a value to int, returning None on failure.
 
     Never raises an exception.
@@ -207,4 +206,4 @@ def today_local(tz_name: str = "America/Chicago") -> str:
 
 def now_utc_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

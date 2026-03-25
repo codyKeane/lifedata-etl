@@ -51,7 +51,7 @@ def parse_quicklog(file_path: str) -> list[Event]:
     to the Mind module.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -107,10 +107,7 @@ def parse_quicklog(file_path: str) -> list[Event]:
                         value_json_data["diastolic"] = diastolic
                 elif category == "19":  # water
                     value_json_data["unit"] = "oz"
-                elif category == "20":  # supplement
-                    value_text = value_str
-                    value_numeric = None
-                elif category == "10":  # meal
+                elif category == "20" or category == "10":  # supplement
                     value_text = value_str
                     value_numeric = None
                 elif category == "11":  # vape
@@ -173,7 +170,7 @@ def parse_samsung_health(file_path: str) -> list[Event]:
         log.warning(f"Unknown health file type: {basename}")
         return []
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -233,7 +230,7 @@ def parse_sleep(file_path: str) -> list[Event]:
     The post_ingest hook computes sleep duration by pairing them.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -289,7 +286,7 @@ def parse_reaction(file_path: str) -> list[Event]:
     Format: epoch,color,reaction_ms
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -348,7 +345,7 @@ def parse_movement_summary(file_path: str) -> list[Event]:
             min_accel_mag,max_accel_mag,activity_class,sample_count
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
 
         reader = csv_mod.DictReader(f)
@@ -405,7 +402,7 @@ def parse_activity_summary(file_path: str) -> list[Event]:
     Format: epoch,date,time,timezone_offset,dominant_activity,activity_counts_json
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
 
         reader = csv_mod.DictReader(f)
@@ -455,7 +452,7 @@ def parse_pedometer_summary(file_path: str) -> list[Event]:
     Format: epoch,date,time,timezone_offset,steps_delta,cumulative_steps
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         import csv as csv_mod
 
         reader = csv_mod.DictReader(f)

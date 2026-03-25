@@ -20,8 +20,8 @@ import json
 import math
 import os
 from collections import Counter
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -128,14 +128,14 @@ class WorldModule(ModuleInterface):
         log.warning(f"No parser found for world file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute and store derived metrics after all world events are ingested.
 
         Derived metrics:
           - world.derived/news_sentiment_index: daily average sentiment
           - world.derived/information_entropy: topic diversity
         """
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         derived_events = []
 
         # Collect today's headline sentiment values
@@ -164,7 +164,7 @@ class WorldModule(ModuleInterface):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
 
         # News Sentiment Index (NSI)
         if sentiments:

@@ -15,9 +15,9 @@ Output: raw/api/gdelt/events_YYYY-MM-DD_HH.json
 
 import json
 import os
-import time
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 
 import requests
 
@@ -123,7 +123,7 @@ def fetch_gdelt_events() -> list[dict]:
                     "seendate": art.get("seendate", ""),
                     "socialimage": art.get("socialimage", ""),
                     "query_name": name,
-                    "fetched_utc": datetime.now(timezone.utc).isoformat(),
+                    "fetched_utc": datetime.now(UTC).isoformat(),
                 }
                 all_articles.append(article)
 
@@ -138,7 +138,7 @@ def fetch_gdelt_events() -> list[dict]:
 
 
 def main():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     print("Fetching GDELT events...")
     articles = fetch_gdelt_events()

@@ -9,7 +9,7 @@ This is the contract between modules and the orchestrator.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -68,14 +68,20 @@ class ModuleInterface(ABC):
         """
         ...
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Optional hook: runs after all events are ingested.
 
         Use for materialized views, daily summaries, derived metrics, etc.
+
+        Args:
+            db: Database instance for queries and writes.
+            affected_dates: Set of YYYY-MM-DD date strings that had events
+                ingested this run. Modules should limit recomputation to
+                these dates when possible. If None, recompute all.
         """
         pass
 
-    def get_daily_summary(self, db: Database, date_str: str) -> Optional[dict[str, Any]]:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Optional: return a dict of daily metrics for this module."""
         return None
 

@@ -23,8 +23,8 @@ Derived metrics (computed in post_ingest):
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -138,7 +138,7 @@ class BodyModule(ModuleInterface):
         log.warning(f"No parser found for body file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived body metrics after all events are ingested.
 
         Derived metrics:
@@ -146,9 +146,9 @@ class BodyModule(ModuleInterface):
           - body.derived/caffeine_level: estimated blood caffeine (mg) at current hour
           - body.derived/sleep_duration: computed from start/end pairs
         """
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         derived_events = []
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
 
         # --- Daily step total ---
         rows = db.execute(
@@ -215,13 +215,13 @@ class BodyModule(ModuleInterface):
                 caffeine_events.append((ts, mg))
 
         if caffeine_events:
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             total_remaining = 0.0
             for ts, mg in caffeine_events:
                 try:
                     intake_dt = datetime.fromisoformat(ts)
                     if intake_dt.tzinfo is None:
-                        intake_dt = intake_dt.replace(tzinfo=timezone.utc)
+                        intake_dt = intake_dt.replace(tzinfo=UTC)
                     hours_elapsed = (now_dt - intake_dt).total_seconds() / 3600
                     if hours_elapsed < 0:
                         continue
@@ -283,9 +283,9 @@ class BodyModule(ModuleInterface):
                     start_dt = datetime.fromisoformat(last_start)
                     end_dt = datetime.fromisoformat(ts)
                     if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+                        start_dt = start_dt.replace(tzinfo=UTC)
                     if end_dt.tzinfo is None:
-                        end_dt = end_dt.replace(tzinfo=timezone.utc)
+                        end_dt = end_dt.replace(tzinfo=UTC)
                     duration_min = (end_dt - start_dt).total_seconds() / 60
                     duration_hours = round(duration_min / 60, 2)
 

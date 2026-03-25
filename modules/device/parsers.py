@@ -15,7 +15,6 @@ Each parser uses safe_parse_rows() from core.parser_utils for standardized
 per-row error handling, logging, and quarantine detection.
 """
 
-from typing import Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -39,7 +38,7 @@ def _is_unresolved(value: str) -> bool:
 # ──────────────────────────────────────────────────────────────
 
 
-def _parse_battery_row(fields: list[str], line_num: int) -> Optional[Event]:
+def _parse_battery_row(fields: list[str], line_num: int) -> Event | None:
     """Parse a single battery CSV row → Event or None."""
     epoch_str = fields[0].strip()
     if not epoch_str.isdigit():
@@ -93,7 +92,7 @@ def _parse_battery_row(fields: list[str], line_num: int) -> Optional[Event]:
     )
 
 
-def _parse_screen_row(fields: list[str], line_num: int) -> Optional[Event]:
+def _parse_screen_row(fields: list[str], line_num: int) -> Event | None:
     """Parse a single screen CSV row → Event or None."""
     if len(fields) < 4:
         return None
@@ -134,7 +133,7 @@ def _parse_screen_row(fields: list[str], line_num: int) -> Optional[Event]:
     )
 
 
-def _parse_charging_row(fields: list[str], line_num: int) -> Optional[Event]:
+def _parse_charging_row(fields: list[str], line_num: int) -> Event | None:
     """Parse a single charging CSV row → Event or None."""
     if len(fields) < 4:
         return None
@@ -169,7 +168,7 @@ def _parse_charging_row(fields: list[str], line_num: int) -> Optional[Event]:
     )
 
 
-def _parse_bluetooth_row(fields: list[str], line_num: int) -> Optional[Event]:
+def _parse_bluetooth_row(fields: list[str], line_num: int) -> Event | None:
     """Parse a single bluetooth CSV row → Event or None."""
     if len(fields) < 4:
         return None

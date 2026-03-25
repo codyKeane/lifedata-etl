@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Compiled once — used to strip embedded newlines from log messages.
 # Prevents log injection attacks from malformed CSV data.
@@ -28,7 +28,7 @@ class StructuredFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         msg = _NEWLINE_RE.sub(" ", record.getMessage())
         log_entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "module": record.name,
             "msg": msg,

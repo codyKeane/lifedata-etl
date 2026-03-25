@@ -9,7 +9,7 @@ Events with confidence below min_confidence are excluded (e.g., the invalid
 environment.sound events at confidence=0.1 are filtered out).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from core.logger import get_logger
 
@@ -33,7 +33,7 @@ class Correlator:
         Returns dict mapping date string -> average value_numeric for that day.
         Only events with confidence >= min_confidence are included.
         """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=window_days)).isoformat()
 
         rows = self.db.conn.execute(
             """
@@ -140,15 +140,73 @@ class Correlator:
             "confidence_tier": self.confidence_tier(len(aligned)),
         }
 
+    def _correlate_from_series(
+        self,
+        metric_a: str,
+        metric_b: str,
+        series_a: dict[str, float],
+        series_b: dict[str, float],
+        window_days: int = 30,
+        lag_days: int = 0,
+    ) -> dict:
+        """Compute correlation from pre-fetched series (avoids redundant DB calls)."""
+        aligned = self._align_series(series_a, series_b, lag_days)
+
+        if len(aligned) < 7:
+            return {
+                "metric_a": metric_a,
+                "metric_b": metric_b,
+                "error": "insufficient_data",
+                "n": len(aligned),
+                "confidence_tier": "none",
+                "message": (
+                    f"Need 7+ co-occurring observations, have {len(aligned)}. "
+                    f"Collect more data before interpreting this relationship."
+                ),
+            }
+
+        a_vals = [p[1] for p in aligned]
+        b_vals = [p[2] for p in aligned]
+
+        from scipy import stats
+
+        pearson_r, pearson_p = stats.pearsonr(a_vals, b_vals)
+        spearman_rho, spearman_p = stats.spearmanr(a_vals, b_vals)
+
+        return {
+            "metric_a": metric_a,
+            "metric_b": metric_b,
+            "window_days": window_days,
+            "lag_days": lag_days,
+            "pearson_r": round(float(pearson_r), 4),
+            "spearman_rho": round(float(spearman_rho), 4),
+            "p_value": round(float(min(pearson_p, spearman_p)), 6),
+            "n": len(aligned),
+            "significant": float(min(pearson_p, spearman_p)) < 0.05,
+            "effect_size": self._interpret_r(float(pearson_r)),
+            "confidence_tier": self.confidence_tier(len(aligned)),
+        }
+
     def run_correlation_matrix(self, metrics: list[str], window_days: int = 30) -> dict:
         """Run all pairwise correlations between a list of metrics.
 
+        Pre-fetches each metric's daily series once, then computes all pairs
+        from the cached data. For N metrics this reduces DB calls from
+        2*C(N,2) to N.
+
         Returns matrix + ranked list of strongest correlations.
         """
+        # Pre-fetch all series (N queries instead of 2*C(N,2))
+        series_cache: dict[str, dict[str, float]] = {}
+        for metric in metrics:
+            series_cache[metric] = self._get_daily_series(metric, window_days)
+
         results = []
         for i, a in enumerate(metrics):
             for b in metrics[i + 1 :]:
-                result = self.correlate(a, b, window_days)
+                result = self._correlate_from_series(
+                    a, b, series_cache[a], series_cache[b], window_days
+                )
                 if "error" not in result:
                     results.append(result)
 

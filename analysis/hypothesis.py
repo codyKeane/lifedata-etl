@@ -58,11 +58,7 @@ class HypothesisTest:
         r = result["pearson_r"]
         p = result["p_value"]
 
-        if self.direction == "negative" and r < 0 and p < self.threshold:
-            supported = True
-        elif self.direction == "positive" and r > 0 and p < self.threshold:
-            supported = True
-        elif self.direction == "any" and p < self.threshold:
+        if self.direction == "negative" and r < 0 and p < self.threshold or self.direction == "positive" and r > 0 and p < self.threshold or self.direction == "any" and p < self.threshold:
             supported = True
 
         return {
