@@ -5,33 +5,29 @@
 # To upgrade: review changelogs, test, then update pins here.
 # ──────────────────────────────────────────────────────────────
 
-# Core Engine
+# Core
 python-dotenv==1.2.2          # .env file loading for API keys
 PyYAML==6.0.3                 # config.yaml parsing
 pydantic==2.12.5              # config validation schema
 
-# HTTP & Feeds
+# API clients
 requests==2.32.5              # API calls (scripts, modules)
 certifi==2026.2.25            # TLS certificate bundle (requests dep)
 charset-normalizer==3.4.6     # encoding detection (requests dep)
 idna==3.11                    # internationalized domain names (requests dep)
 urllib3==2.6.3                # HTTP library (requests dep)
+
+# Data processing
 feedparser==6.0.12            # RSS feed parsing
 sgmllib3k==1.0.0              # SGML parser (feedparser dep)
+Pillow==12.1.1                # EXIF extraction from photos
+astral==3.2                   # sunrise/sunset, planetary hours
 
-# Analysis Engine
+# Analysis
 numpy==2.4.3                  # numerical computations
 scipy==1.17.1                 # statistical tests (pearson, spearman)
 
-# NLP
+# NLP / Transcription
 vaderSentiment==3.3.2         # headline sentiment analysis
-
-# Media
-Pillow==12.1.1                # EXIF extraction from photos
-
-# Astronomy
-astral==3.2                   # sunrise/sunset, planetary hours
-
-# Optional (uncomment when ready)
-# openai-whisper               # transcription (~1GB+ install)
-# pyswisseph                   # Swiss Ephemeris calculations
+# openai-whisper               # transcription (~1GB+ install, optional)
+# pyswisseph                   # Swiss Ephemeris calculations (optional)

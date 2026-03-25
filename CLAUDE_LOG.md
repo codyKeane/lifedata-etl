@@ -1,5 +1,56 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Dependency Pinning, Makefile & Tool Config
+
+**Task:** Audit all Python imports, update requirements files, add Makefile targets, create pyproject.toml.
+
+### Import Audit Summary
+
+Scanned 60 Python files across `core/`, `modules/`, `analysis/`, `scripts/`, and `run_etl.py`. Found 11 third-party packages (10 production + 1 optional):
+- **Core:** pydantic, PyYAML, python-dotenv
+- **API clients:** requests (+ certifi, charset-normalizer, idna, urllib3)
+- **Data processing:** feedparser, sgmllib3k, Pillow, astral
+- **Analysis:** numpy, scipy
+- **NLP:** vaderSentiment
+- **Optional:** openai-whisper (lazy-loaded)
+
+### Changes Made
+
+1. **`requirements.txt`** — Regrouped with standard comment headers: `# Core`, `# API clients`, `# Data processing`, `# Analysis`, `# NLP / Transcription`. All versions remain pinned with `==`.
+
+2. **`requirements-dev.txt`** — Added missing tools: `pytest-cov==7.1.0`, `pytest-timeout==2.4.0`, `mypy==1.19.1`, `types-PyYAML==6.0.12.20250915`, `types-requests==2.32.4.20260324`. Retained existing tools (ruff, pyright, Pygments, pytest_tmp_files).
+
+3. **`Makefile`** — Added missing targets: `test-cov`, `typecheck`, `etl` (with `--report`), `status`, `clean`. Updated `test` to include `--timeout=30`. Updated `lint`/`format` to scope to `core/ modules/ analysis/ scripts/`. Renamed `etl-dry-run` → `etl-dry`.
+
+4. **`pyproject.toml`** — Created with ruff config (line-length=100, target-version=py311, select=E/F/W/I/UP/B/SIM), mypy config (strict for core/, warn_return_any=true), pytest config (testpaths=tests, timeout=30).
+
+### Verification
+
+- ✅ `pip install -r requirements.txt` — all deps already satisfied
+- ✅ `pip install -r requirements-dev.txt` — all deps installed (new: pytest-cov, pytest-timeout, mypy, type stubs)
+- ✅ All 11 Makefile targets expand correctly (`make -n`)
+- ✅ `pyproject.toml` validates via `tomllib.load()`
+- ✅ `ruff`, `mypy`, `pytest` all importable from venv
+
+## 2026-03-24 — Git Repository Setup & Branch Structure
+
+**Task:** Audit repo, create comprehensive `.gitignore`, set up branch structure, create CHANGELOG, commit on main, checkout dev.
+
+### Changes Made
+
+1. **`.gitignore`** — Updated to comprehensive exclusions: `*.env*`, `db/*.db`, `db/backups/`, `raw/`, `media/`, `venv/`, `logs/`, `__pycache__/`, `*.pyc`, `*.pyo`, `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/`, `*.egg-info/`, `reports/`, `.stfolder/`, IDE/OS files.
+2. **`CHANGELOG.md`** — Created with `[4.0.0] — Unreleased` section documenting v3→v4 migration, modular architecture, and security hardening.
+3. **Git commit** — All source code committed on `main` as `dee4c91`: "feat: LifeData v4.0 — modular architecture with security hardening" (74 files, 14210 insertions).
+4. **Branch structure** — Created `dev` branch and checked it out for subsequent work.
+
+### Verification
+
+- ✅ `git status` confirmed no `.env`, `db/`, `raw/`, or `media/` files staged before commit.
+- ✅ Commit succeeded on `main` with 74 files changed.
+- ✅ `dev` branch created and checked out — working tree clean.
+
+---
+
 ## 2026-03-24 — Metrics Export & Status CLI
 
 **Task:** Add lightweight metrics export after each ETL run, and a `--status` CLI command for health summaries.
