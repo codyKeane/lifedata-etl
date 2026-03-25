@@ -1,5 +1,28 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Comprehensive Test Fixtures (conftest.py)
+
+**Task:** Extend `tests/conftest.py` with comprehensive fixtures for the full test suite.
+
+### Changes Made
+
+1. **`tests/conftest.py`** — Added 5 new fixtures while preserving all existing ones:
+   - **`sample_config`** — Returns a valid `LifeDataConfig` object pointing to `tmp_path` directories (db, raw, media, reports, logs). Includes a realistic `SecurityConfig` with module allowlist.
+   - **`tmp_database`** — Creates a fresh SQLite database with full schema (events, modules, media, daily_summaries, correlations, events_fts). Asserts all tables exist. Tears down after use.
+   - **`sample_events`** — Returns 20 realistic `Event` objects spanning multiple modules: 5 device.screen (on/off alternating, varying battery), 3 device.battery pulses (15 min apart with value_json), 3 environment.weather snapshots, 2 environment.geomagnetic (Kp=2 and Kp=5), 3 mind.mood check_ins (values 4, 7, 8), 2 social.notification, 1 body.caffeine intake, 1 mind.synchronicity with value_text. All timestamps within past week, America/Chicago timezone, `-0500` offset.
+   - **`sample_csv_dir`** — Creates `raw/LifeData/LifeData/logs/` with: well-formed screen CSV (10 rows), well-formed battery CSV (5 rows), malformed/truncated CSV, future-timestamp CSV, empty-row CSV, non-UTF8 CSV, zero-byte file.
+   - **`populated_database`** — Combines `tmp_database` + `sample_events`, inserts all 20 events, asserts insertion count, returns the Database.
+
+2. Also added `QUICKLOG_CAFFEINE_LINES` and `QUICKLOG_MEAL_LINES` sample constants for body module parser tests.
+
+### Test Results
+
+- **262 tests pass** — no regressions from existing test suite
+- All 20 sample events validated (`is_valid == True`)
+- Timestamps verified: base `2026-03-20T13:00:00+00:00` UTC / `2026-03-20T08:00:00-05:00` local
+
+---
+
 ## 2026-03-24 — Typed Config Validation with Pydantic
 
 **Task:** Create `core/config.py` with `load_config()`, add syncthing relay hard error, update orchestrator to use typed config, add config tests.
