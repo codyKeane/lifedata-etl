@@ -1,5 +1,35 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — ETL Integration Tests
+
+**Task:** Create `tests/test_etl_integration.py` — end-to-end tests that run the actual Orchestrator against synthetic data in temporary directories.
+
+**Analysis:** No integration tests existed. The codebase had unit tests for parsers, events, and database, but nothing that exercised the full ETL pipeline end-to-end. The `Orchestrator.run()` method, module discovery, SAVEPOINT isolation, file stability checks, and lockfile concurrency guard were all untested at the integration level.
+
+**Changes made:**
+- Created `tests/test_etl_integration.py` with 8 tests across 6 test classes:
+
+| Test Class | Test | What it verifies |
+|---|---|---|
+| `TestFullETLCycle` | `test_full_etl_cycle` | Creates tmp dir structure with device/environment/mind CSVs, runs Orchestrator, verifies event count, source_modules in DB, no duplicate raw_source_ids, modules table updated with last_run_utc and success status |
+| `TestETLIdempotency` | `test_etl_idempotency` | Runs ETL twice on same data, verifies event count identical, event_ids identical (deterministic INSERT OR REPLACE) |
+| `TestETLModuleIsolation` | `test_etl_module_isolation` | Patches environment module's discover_files to crash, verifies device events ingested successfully, environment marked failed in modules table, no environment events in DB |
+| `TestETLRespectsAllowlist` | `test_etl_respects_allowlist` | Config has allowlist=["device"] only, places CSVs for device+environment+mind, verifies only device events in DB, environment never loaded |
+| `TestETLSkipsUnstableFiles` | `test_etl_skips_unstable_files` | Sets screen CSV mtime to 5 seconds ago (within 60s stability window), verifies it was skipped while stable battery CSV was ingested |
+| `TestETLLockfile` | `test_lockfile_prevents_concurrent_run` | Acquires flock, verifies second acquisition raises OSError |
+| `TestETLLockfile` | `test_lockfile_released_after_completion` | Releases lock, verifies second acquisition succeeds |
+| `TestETLLockfile` | `test_run_etl_lock_mechanism` | Tests actual `run_etl._acquire_lock()` function, verifies SystemExit(3) on concurrent attempt |
+
+**Key implementation details:**
+- Helper functions build a complete tmp LifeData directory (config.yaml, .env, raw/ tree with realistic CSVs)
+- `_make_orchestrator()` patches `load_config` to use the test .env path
+- Device post_ingest creates derived events (unlock_count, screen_time, battery_drain) — tests account for this
+- Module isolation uses `unittest.mock.patch` at the class level since `Orchestrator.run()` re-discovers modules
+
+**Test results:** 8/8 passed. Full suite: 509/509 passed in 0.53s.
+
+---
+
 ## 2026-03-24 — Parser Tests for All Implemented Modules
 
 **Task:** Create parser tests for every module with `parsers.py`, covering happy paths, malformed input, and timezone_offset verification.
