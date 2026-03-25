@@ -179,7 +179,7 @@ def parse_iching_casting(file_path: str) -> list[Event]:
     Emits one casting Event + one moving_line Event per changing line.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -324,7 +324,7 @@ def parse_iching_auto(file_path: str) -> list[Event]:
       epoch_ts,time_local,timezone,method,hex_num,hex_name,lines,changing,result_num,result_name
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -415,7 +415,7 @@ def parse_rng_samples(file_path: str) -> list[Event]:
       epoch_ts,time_local,timezone,mean,z_score
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -489,7 +489,7 @@ def parse_rng_raw(file_path: str) -> list[Event]:
         log.warning(f"rng_raw: timestamp parse error: {e}")
         return events
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         content = f.read().strip()
         if not content:
             return events
@@ -553,7 +553,7 @@ def parse_schumann(file_path: str) -> list[Event]:
     """
     events: list[Event] = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"schumann: failed to load {file_path}: {e}")
@@ -660,7 +660,7 @@ def parse_planetary_hours(file_path: str) -> list[Event]:
     """
     events: list[Event] = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         log.warning(f"planetary: failed to load {file_path}: {e}")

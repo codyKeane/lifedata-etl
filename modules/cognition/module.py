@@ -27,8 +27,8 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -124,9 +124,10 @@ class CognitionModule(ModuleInterface):
         log.warning(f"No parser found for cognition file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived cognition metrics after all events are ingested.
 
+        Only recomputes for dates that had events ingested this run.
         Derived metrics:
           - cognition.reaction.derived/daily_baseline: median simple RT per day
           - cognition.derived/cognitive_load_index: weighted composite z-score
@@ -138,18 +139,21 @@ class CognitionModule(ModuleInterface):
         baseline_days = self._config.get("baseline_window_days", 14)
         impairment_threshold = self._config.get("impairment_zscore_threshold", 2.0)
 
-        # Get all dates with cognition data
-        rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_utc) as d
-            FROM events
-            WHERE source_module LIKE 'cognition.%'
-              AND source_module NOT LIKE '%.derived'
-            ORDER BY d
-            """
-        )
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
-        dates = [r[0] for r in result_set if r[0]]
+        if affected_dates is not None:
+            dates = sorted(affected_dates)
+        else:
+            # Fallback: recompute all dates
+            rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_utc) as d
+                FROM events
+                WHERE source_module LIKE 'cognition.%'
+                  AND source_module NOT LIKE '%.derived'
+                ORDER BY d
+                """
+            )
+            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            dates = [r[0] for r in result_set if r[0]]
 
         for date_str in dates:
             # --- Daily RT baseline ---
@@ -263,7 +267,7 @@ class CognitionModule(ModuleInterface):
 
         return events
 
-    def _compute_cognitive_load_index(self, db: Database, date_str: str, baseline_days: int) -> Optional[Event]:
+    def _compute_cognitive_load_index(self, db: Database, date_str: str, baseline_days: int) -> Event | None:
         """Weighted composite z-score across all available cognitive probes."""
         components = {}
 
@@ -339,7 +343,7 @@ class CognitionModule(ModuleInterface):
 
     def _compute_impairment_flag(
         self, db: Database, date_str: str, cli_value: float, baseline_days: int, threshold: float
-    ) -> Optional[Event]:
+    ) -> Event | None:
         """Binary flag: CLI > threshold σ above baseline (= impaired)."""
         rows = db.execute(
             """
@@ -388,7 +392,7 @@ class CognitionModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_peak_cognition_hour(self, db: Database, baseline_days: int) -> Optional[Event]:
+    def _compute_peak_cognition_hour(self, db: Database, baseline_days: int) -> Event | None:
         """Hour of day with best average probe scores (rolling window)."""
         rows = db.execute(
             """
@@ -413,7 +417,7 @@ class CognitionModule(ModuleInterface):
         best_hour = result_set[0][0]
         best_avg_rt = result_set[0][1]
 
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
         return Event(
             timestamp_utc=now_utc,
             timestamp_local=now_utc,
@@ -432,7 +436,7 @@ class CognitionModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_subjective_objective_gap(self, db: Database, date_str: str) -> Optional[Event]:
+    def _compute_subjective_objective_gap(self, db: Database, date_str: str) -> Event | None:
         """Difference between self-reported energy/focus and probe performance."""
         # Get subjective scores from mind module
         subj_rows = db.execute(
@@ -458,65 +462,37 @@ class CognitionModule(ModuleInterface):
         # Normalize to approximate z-score space
         subj_z = (subj_mean - 5.5) / 2.0
 
-        # Get objective: average simple RT z-score for the day
-        rt_rows = db.execute(
+        # Get today's RT + baseline RT values in ONE query (replaces 3 queries)
+        # Fetch all simple_rt values for today AND the baseline window
+        all_rt_rows = db.execute(
             """
-            SELECT AVG(value_numeric) as avg_rt
+            SELECT value_numeric, date(timestamp_utc) as d
             FROM events
             WHERE source_module = 'cognition.reaction'
               AND event_type = 'simple_rt'
-              AND date(timestamp_utc) = ?
-              AND value_numeric IS NOT NULL
-            """,
-            (date_str,),
-        )
-        rt_set: list[Any] = rt_rows.fetchall() if hasattr(rt_rows, "fetchall") else list(rt_rows)
-        if not rt_set or rt_set[0][0] is None:
-            return None
-
-        today_rt = rt_set[0][0]
-
-        # Get baseline RT
-        baseline_rows = db.execute(
-            """
-            SELECT AVG(value_numeric) as mean_rt,
-                   COUNT(*) as n
-            FROM events
-            WHERE source_module = 'cognition.reaction'
-              AND event_type = 'simple_rt'
-              AND date(timestamp_utc) BETWEEN date(?, '-14 days') AND date(?, '-1 day')
+              AND date(timestamp_utc) BETWEEN date(?, '-14 days') AND ?
               AND value_numeric IS NOT NULL
             """,
             (date_str, date_str),
         )
-        bl_set: list[Any] = (
-            baseline_rows.fetchall()
-            if hasattr(baseline_rows, "fetchall")
-            else list(baseline_rows)
-        )
-        if not bl_set or bl_set[0][0] is None or bl_set[0][1] < 3:
+        all_rt_set = all_rt_rows.fetchall() if hasattr(all_rt_rows, "fetchall") else list(all_rt_rows)
+
+        today_vals = [r[0] for r in all_rt_set if r[1] == date_str]
+        baseline_vals = [r[0] for r in all_rt_set if r[1] != date_str]
+
+        if not today_vals:
+            return None
+
+        today_rt = sum(today_vals) / len(today_vals)
+
+        if len(baseline_vals) < 3:
             # Not enough baseline — use raw RT as a crude signal
             # Lower RT = better → invert so positive = good
             obj_z = -(today_rt - 300) / 100  # rough normalization around 300ms
         else:
-            baseline_mean = bl_set[0][0]
-            # Compute std
-            std_rows = db.execute(
-                """
-                SELECT value_numeric FROM events
-                WHERE source_module = 'cognition.reaction'
-                  AND event_type = 'simple_rt'
-                  AND date(timestamp_utc) BETWEEN date(?, '-14 days') AND date(?, '-1 day')
-                  AND value_numeric IS NOT NULL
-                """,
-                (date_str, date_str),
-            )
-            std_set = std_rows.fetchall() if hasattr(std_rows, "fetchall") else std_rows
-            vals = [r[0] for r in std_set]
+            baseline_mean = sum(baseline_vals) / len(baseline_vals)
             std_rt = (
-                math.sqrt(sum((x - baseline_mean) ** 2 for x in vals) / len(vals))
-                if vals
-                else 50
+                math.sqrt(sum((x - baseline_mean) ** 2 for x in baseline_vals) / len(baseline_vals))
             )
             std_rt = max(std_rt, 1)
             obj_z = -(today_rt - baseline_mean) / std_rt  # invert: lower RT = positive
@@ -552,7 +528,7 @@ class CognitionModule(ModuleInterface):
         source_module: str,
         event_type: str,
         invert: bool = False,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Compute z-score for a metric on a given day vs rolling baseline."""
         # Today's value
         rows = db.execute(
@@ -599,7 +575,7 @@ class CognitionModule(ModuleInterface):
         z: float = (today_val - mean_val) / std_val
         return -z if invert else z
 
-    def _zscore_time_error(self, db: Database, date_str: str, baseline_days: int) -> Optional[float]:
+    def _zscore_time_error(self, db: Database, date_str: str, baseline_days: int) -> float | None:
         """Z-score for absolute time production error."""
         rows = db.execute(
             """

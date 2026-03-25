@@ -15,7 +15,7 @@ Output: raw/api/rss/feeds_YYYY-MM-DD_HH.json
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import feedparser
 import yaml
@@ -36,7 +36,7 @@ def load_rss_feeds(config_path: str | None = None) -> list[dict]:
     """Load the RSS feed list from config.yaml."""
     if config_path is None:
         config_path = os.path.join(PROJECT_ROOT, "config.yaml")
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
     feeds = (
         config.get("lifedata", {})
@@ -83,7 +83,7 @@ def fetch_rss_feeds(feeds: list[dict]) -> list[dict]:
                     "feed_url": url,
                     "category": category,
                     "sentiment": sentiment["compound"],
-                    "fetched_utc": datetime.now(timezone.utc).isoformat(),
+                    "fetched_utc": datetime.now(UTC).isoformat(),
                 }
                 all_articles.append(article)
 
@@ -95,7 +95,7 @@ def fetch_rss_feeds(feeds: list[dict]) -> list[dict]:
 
 
 def main():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     feeds = load_rss_feeds()
     if not feeds:

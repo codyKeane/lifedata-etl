@@ -15,7 +15,8 @@ File discovery pattern:
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from datetime import UTC
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -113,20 +114,20 @@ class MediaModule(ModuleInterface):
         log.warning(f"No parser found for media file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Post-ingestion: run optional transcription and compute derived metrics.
 
         If auto_transcribe is enabled and Whisper is available, transcribe
         any pending voice files.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         # Run transcription if configured
         if self._config.get("auto_transcribe", False):
             try:
-                from modules.media.transcribe import transcribe_pending, is_whisper_available
+                from modules.media.transcribe import is_whisper_available, transcribe_pending
                 if is_whisper_available():
                     media_dir = os.path.expanduser(
                         "~/LifeData/raw/LifeData/logs/media"
@@ -141,7 +142,7 @@ class MediaModule(ModuleInterface):
                 log.warning(f"Transcription error: {e}")
 
         # Compute daily media frequency metrics
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
         derived_events = []
 
         rows = db.execute(

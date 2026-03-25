@@ -17,11 +17,13 @@ Output: raw/api/news/headlines_YYYY-MM-DD_HH.json
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from dotenv import load_dotenv
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+from scripts._http import retry_get
 
 # Project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +47,7 @@ def fetch_news(api_key: str, country: str = "us") -> list[dict]:
 
     for category in CATEGORIES:
         try:
-            resp = requests.get(
+            resp = retry_get(
                 NEWSAPI_URL,
                 params={
                     "apiKey": api_key,
@@ -83,7 +85,7 @@ def fetch_news(api_key: str, country: str = "us") -> list[dict]:
                         "neg": sentiment["neg"],
                         "neu": sentiment["neu"],
                     },
-                    "fetched_utc": datetime.now(timezone.utc).isoformat(),
+                    "fetched_utc": datetime.now(UTC).isoformat(),
                 }
                 all_articles.append(article)
 
@@ -95,7 +97,7 @@ def fetch_news(api_key: str, country: str = "us") -> list[dict]:
 
 
 def main():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     api_key = os.environ.get("NEWS_API_KEY", "")
 
     print("Fetching NewsAPI headlines...")

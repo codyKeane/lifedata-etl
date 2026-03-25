@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 # Lazy Whisper import — only load when actually called
 _whisper_model: Any = None
@@ -104,7 +104,7 @@ def transcribe_pending(
                 })
                 print(f"    → {len(transcript)} chars, {result.get('language', '?')}")
             else:
-                print(f"    → (empty transcript)")
+                print("    → (empty transcript)")
 
         except Exception as e:
             print(f"    → ERROR: {e}")

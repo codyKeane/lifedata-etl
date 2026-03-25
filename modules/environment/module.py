@@ -99,30 +99,32 @@ class EnvironmentModule(ModuleInterface):
         log.warning(f"No parser found for environment file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived environment metrics after ingestion.
 
-        Processes all dates that have environment events,
-        ensuring derived metrics are computed for backfilled data.
+        Only recomputes for dates that had events ingested this run.
 
         Derived metrics per day:
           - environment.derived/daily_weather_composite: temp range, avg humidity, avg temp, avg pressure
           - environment.derived/location_diversity: unique locations at ~111m resolution
           - environment.derived/astro_summary: moon phase and illumination
         """
-        # Find all dates with environment events
-        date_rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_local) as d FROM events
-            WHERE source_module LIKE 'environment.%'
-              AND source_module != 'environment.derived'
-            ORDER BY d
-            """
-        ).fetchall()
+        if affected_dates is not None:
+            days = sorted(affected_dates)
+        else:
+            date_rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_local) as d FROM events
+                WHERE source_module LIKE 'environment.%'
+                  AND source_module != 'environment.derived'
+                ORDER BY d
+                """
+            ).fetchall()
+            days = [row[0] for row in date_rows]
 
         all_derived: list[Event] = []
 
-        for (day,) in date_rows:
+        for day in days:
             day_derived = self._compute_day_metrics(db, day)
             all_derived.extend(day_derived)
 

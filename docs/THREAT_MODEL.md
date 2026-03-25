@@ -1,6 +1,6 @@
 # LifeData V4 — Threat Model
 
-Last reviewed: 2026-03-24
+Last reviewed: 2026-03-25
 
 This document describes what LifeData protects, who it protects against,
 and how the current architecture addresses (or fails to address) each
@@ -292,3 +292,37 @@ The `Orchestrator.__init__()` runs automated checks at every ETL startup:
 3. **`~/LifeData/` directory permissions** — warns if not 0700
 4. **Syncthing shared folder** — warns if `~/LifeData/` contains `.stfolder/` marker
 5. **Disk encryption** — best-effort check for LUKS/fscrypt on the partition
+
+---
+
+## Security Audit Remediation History
+
+**Audit date:** 2026-03-24
+**Auditor:** Claude Code (Security Engineering Review)
+**Status:** All 21 findings remediated and verified.
+
+| ID | Severity | Finding | Remediation |
+|----|----------|---------|-------------|
+| H-1 | High | Empty allowlist bypassed module security (fail-open) | Changed to fail-closed: empty allowlist = 0 modules loaded |
+| H-2 | High | Unrestricted SQL via `execute()` in schema migrations | New `execute_migration()` validates CREATE/ALTER only; `execute()` restricted to SELECT |
+| H-3 | High | `post_ingest()` receives full Database object | Mitigated by H-1 (only trusted modules get access); documented as accepted risk |
+| M-1 | Medium | Database file created with default permissions | `chmod 0o600` on db file, `0o700` on db directory at creation |
+| M-2 | Medium | Backup files created with default permissions | `chmod 0o600` on backup files, `0o700` on backup directory |
+| M-3 | Medium | Log files created with default permissions | `chmod 0o600` on `etl.log` after creation |
+| M-4 | Medium | No file extension whitelist on parsed files | Added `ALLOWED_EXTENSIONS = {".csv", ".json"}` filter |
+| M-5 | Medium | Pydantic config schema had no Syncthing relay validator | Added hard-error validator rejecting `syncthing_relay_enabled: true` |
+| M-6 | Medium | Config schema had no module allowlist validator | Added `allowlist_not_empty` validator requiring >= 1 module |
+| M-7 | Medium | No startup permission checks | Added 5-point startup security check (env, config, dir, stfolder, encryption) |
+| M-8 | Medium | Config schema had no timezone validator | Added `zoneinfo.ZoneInfo` validation for timezone field |
+| L-1 | Low | Log messages could contain raw CSV data with PII | Added `sanitizer.py` with coordinate truncation, phone/email/key redaction |
+| L-2 | Low | Newline injection possible in structured logs | Added `_NEWLINE_RE` stripping in `StructuredFormatter` |
+| L-3 | Low | No file stability window for mid-sync files | Added `file_stability_seconds` (60s) — skip files modified recently |
+| L-4 | Low | No ETL concurrency protection | Added `flock`-based exclusive lock with timeout |
+| L-5 | Low | Database backup used `shutil.copy2` | Replaced with SQLite `conn.backup()` API for safe online backups |
+| L-6 | Low | No FTS5 delete trigger for INSERT OR REPLACE | Added `AFTER DELETE` trigger to clean stale FTS entries |
+| L-7 | Low | `post_ingest()` recomputed all historical dates | Added `affected_dates` parameter; modules only recompute changed dates |
+| L-8 | Low | No expression index for date-based queries | Added `CREATE INDEX idx_events_date_local ON events(date(timestamp_local))` |
+| L-9 | Low | No rate limiting on API fetcher scripts | Added `scripts/_http.retry_get()` with exponential backoff |
+| D-1 | Design | Module sovereignty violation: analysis layer queries hardcoded source_module strings | Documented; modules should register metrics via `get_daily_summary()` (future work) |
+
+For original code snapshots and detailed revert instructions, see git history at commit `6d78a42` (pre-audit baseline).

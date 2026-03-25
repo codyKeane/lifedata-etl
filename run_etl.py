@@ -375,13 +375,12 @@ def main() -> int:
         return 2
 
     finally:
-        # Release lock — fd close releases the flock automatically
+        # Release lock — closing the fd releases the flock automatically.
+        # We intentionally do NOT unlink the lock file: flock operates on
+        # the file descriptor, not the path, so unlinking is unnecessary
+        # and could cause race conditions with concurrent processes.
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
-        try:
-            os.unlink(LOCK_FILE)
-        except OSError:
-            pass
 
 
 if __name__ == "__main__":

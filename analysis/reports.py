@@ -8,7 +8,7 @@ events, anomalies, correlations, and system health.
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from analysis.anomaly import AnomalyDetector
 from core.logger import get_logger
@@ -56,7 +56,7 @@ def generate_daily_report(
     # ── Header ──
     sections.append(f"# LifeData Daily Report — {date_str}\n")
     sections.append(
-        f"*Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*\n"
+        f"*Generated {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}*\n"
     )
 
     # ── Data Summary ──

@@ -8,8 +8,8 @@ reinvent the try/except-per-line + quarantine pattern.
 """
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -37,7 +37,7 @@ class ParseResult:
 
 def safe_parse_rows(
     filepath: str,
-    parse_fn: Callable[[list[str], int], Optional[Event | list[Event]]],
+    parse_fn: Callable[[list[str], int], Event | list[Event] | None],
     module_id: str,
 ) -> ParseResult:
     """Iterate rows of a CSV file with per-row error handling.
@@ -61,7 +61,7 @@ def safe_parse_rows(
     result = ParseResult(filepath=filepath)
 
     try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
             for line_num, raw_line in enumerate(f, 1):
                 line = raw_line.strip()
                 if not line:

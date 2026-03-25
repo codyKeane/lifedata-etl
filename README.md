@@ -1,43 +1,49 @@
 # LifeData V4
 
-LifeData V4 is a local-first ETL pipeline that collects behavioral and environmental data, normalizes it into unified events, and stores it in SQLite.
+A local-first personal data observatory. Collects behavioral, environmental, and physiological data from an Android phone (Tasker + Syncthing), external APIs, and sensors. Normalizes everything into universal Event objects in SQLite. Surfaces correlations, anomalies, and daily reports.
 
 ## Architecture
 
-- **Core (`core/`)**: Execution engine (`orchestrator.py`), SQLite manager (`database.py`), universal event schema (`event.py`), and module interface abstractions.
-- **Modules (`modules/`)**: Eight independent data ingestion modules (`device`, `body`, `mind`, `environment`, `social`, `world`, `media`, `meta`). Modules do not import from one another. Each module is transactionally isolated by a SQLite SAVEPOINT.
-- **Analysis (`analysis/`)**: Scripted correlation (`correlator.py`), anomaly detection (`anomaly.py`), and daily report generation (`reports.py`).
+- **Core (`core/`)** — ETL engine: orchestrator, SQLite manager (WAL + SAVEPOINT isolation), universal Event schema, Pydantic config validation.
+- **Modules (`modules/`)** — 11 sovereign data modules: `device`, `body`, `mind`, `environment`, `social`, `world`, `media`, `meta`, `cognition`, `behavior`, `oracle`. No module imports another.
+- **Analysis (`analysis/`)** — Pearson/Spearman correlation, z-score anomaly detection, multi-variable pattern alerts, hypothesis testing, daily markdown reports.
+- **Scripts (`scripts/`)** — API fetchers with retry/backoff: news, markets, RSS, GDELT, Schumann resonance, planetary hours, sensor processing.
 
-## Data Flow
-
-Data sources (Tasker logs via Syncthing, scheduled API scripts, offline sensors) write to the `raw/` directory. The orchestrator runs module parsers that convert raw updates into `Event` objects, which are inserted into the SQLite database. 
-
-## Installation
+## Quick Start
 
 ```bash
-python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+python run_etl.py --report       # Full ETL + daily report
+python run_etl.py --status       # Health summary
+python run_etl.py --dry-run      # Parse without writing
+python run_etl.py --module device # Single module
+make test                         # Run 605 tests
 ```
 
-## Execution
+## Principles
 
-```bash
-# Run full pipeline
-python run_etl.py
+- **Raw data is sacred** — files in `raw/` are never modified.
+- **Idempotent ingestion** — deterministic SHA-256 event IDs; re-running produces identical results.
+- **Module sovereignty** — each module owns its parsing, schema, and failure modes. One crash cannot affect another.
+- **Local-first** — no cloud dependencies. Syncthing device-to-device only (relays disabled).
 
-# Run specific module
-python run_etl.py --module device
+## Documentation
 
-# Run without database writes (parsing test)
-python run_etl.py --dry-run
+| Document | Purpose |
+|----------|---------|
+| [`USER_GUIDE.md`](USER_GUIDE.md) | How to install, configure, and operate LifeData |
+| [`docs/MASTER_WALKTHROUGH.md`](docs/MASTER_WALKTHROUGH.md) | Complete system bible — every moving part documented |
+| [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Security model, attack vectors, mitigations |
+| [`docs/EXAMINATION_REPORT.md`](docs/EXAMINATION_REPORT.md) | Codebase audit findings and implementation status |
+| [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) | Benchmark numbers for regression detection |
+| [`docs/tasker/`](docs/tasker/) | Tasker task definitions (XML + manual creation guides) |
 
-# Run pipeline and generate daily report
-python run_etl.py --report
-```
+## Configuration
 
-## Data Principles
+- `config.yaml` — Module settings, API params, analysis thresholds, cron schedules.
+- `.env` — API keys (`chmod 600`, gitignored). Uses `${ENV_VAR}` placeholders resolved at runtime.
 
-- The system relies on `config.yaml` for module structure and `.env` for API credentials.
-- Ingestion scripts never alter source files in `raw/`.
-- Pipeline executions are idempotent. Deduplication is handled via SHA-256 hashed event IDs.
+## License
+
+Personal project. Not licensed for redistribution.

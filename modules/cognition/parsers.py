@@ -33,7 +33,7 @@ def parse_simple_rt(file_path: str) -> list[Event]:
     Emits one Event per trial + one summary Event with median RT.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -138,7 +138,7 @@ def parse_choice_rt(file_path: str) -> list[Event]:
     trial_data: pipe-delimited target:response:rt_ms:correct triplets
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -206,7 +206,7 @@ def parse_choice_rt(file_path: str) -> list[Event]:
                 if rts:
                     correct_rts = [
                         rt
-                        for rt, t in zip(rts, trials)
+                        for rt, t in zip(rts, trials, strict=False)
                         if len(t) >= 4 and safe_int(t[3])
                     ]
                     summary_rts = correct_rts if correct_rts else rts
@@ -260,7 +260,7 @@ def parse_gonogo(file_path: str) -> list[Event]:
       correct = 1 or 0
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -377,7 +377,7 @@ def parse_digit_span(file_path: str) -> list[Event]:
     trial_data: pipe-delimited sequence:response:correct triplets
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -465,7 +465,7 @@ def parse_time_production(file_path: str) -> list[Event]:
     CSV format: epoch_ts,time_local,timezone_offset,target_sec,produced_ms,error_ms,error_pct
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -527,7 +527,7 @@ def parse_time_estimation(file_path: str) -> list[Event]:
     CSV format: epoch_ts,time_local,timezone_offset,actual_ms,estimate_ms,error_ms
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -593,7 +593,7 @@ def parse_typing_speed(file_path: str) -> list[Event]:
     CSV format: epoch_ts,time_local,timezone_offset,wpm,accuracy_pct,errors,chars,duration_sec
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:

@@ -33,7 +33,7 @@ def parse_hourly(file_path: str) -> list[Event]:
     The multi-line WiFi blocks are separated by the next epoch line.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         content = f.read()
 
     # Split on lines that start with an epoch timestamp (10+ digits)
@@ -103,7 +103,7 @@ def parse_geofence(file_path: str) -> list[Event]:
     No date/time columns — only epoch.
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -160,7 +160,7 @@ def parse_astro(file_path: str) -> list[Event]:
     Format: epoch,moon_day,moon_phase_name,moon_illumination_pct,sun_hours
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -234,7 +234,7 @@ def parse_barometer_summary(file_path: str) -> list[Event]:
     import csv as csv_mod
 
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:
@@ -288,7 +288,7 @@ def parse_light_summary(file_path: str) -> list[Event]:
     import csv as csv_mod
 
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:
@@ -341,7 +341,7 @@ def parse_magnetometer_summary(file_path: str) -> list[Event]:
     import csv as csv_mod
 
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         reader = csv_mod.DictReader(f)
         for line_num, row in enumerate(reader, 2):
             try:

@@ -26,8 +26,8 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -131,9 +131,10 @@ class OracleModule(ModuleInterface):
         log.warning(f"No parser found for oracle file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived oracle metrics after all events are ingested.
 
+        Only recomputes for dates that had events ingested this run.
         Derived metrics:
           - oracle.iching.derived/hexagram_frequency: distribution over window
           - oracle.iching.derived/entropy_test: chi-squared uniformity test
@@ -143,18 +144,21 @@ class OracleModule(ModuleInterface):
         """
         derived_events = []
 
-        # Get all dates with oracle data
-        rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_utc) as d
-            FROM events
-            WHERE source_module LIKE 'oracle.%'
-              AND source_module NOT LIKE '%.derived'
-            ORDER BY d
-            """
-        )
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
-        dates = [r[0] for r in result_set if r[0]]
+        if affected_dates is not None:
+            dates = sorted(affected_dates)
+        else:
+            # Fallback: recompute all dates
+            rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_utc) as d
+                FROM events
+                WHERE source_module LIKE 'oracle.%'
+                  AND source_module NOT LIKE '%.derived'
+                ORDER BY d
+                """
+            )
+            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            dates = [r[0] for r in result_set if r[0]]
 
         for date_str in dates:
             # --- RNG daily deviation ---
@@ -221,7 +225,7 @@ class OracleModule(ModuleInterface):
         ts_utc = (
             f"{latest_date}T23:59:01+00:00"
             if latest_date
-            else datetime.now(timezone.utc).isoformat()
+            else datetime.now(UTC).isoformat()
         )
         return Event(
             timestamp_utc=ts_utc,
@@ -287,7 +291,7 @@ class OracleModule(ModuleInterface):
         ts_utc = (
             f"{latest_date}T23:59:02+00:00"
             if latest_date
-            else datetime.now(timezone.utc).isoformat()
+            else datetime.now(UTC).isoformat()
         )
         return Event(
             timestamp_utc=ts_utc,
@@ -457,53 +461,39 @@ class OracleModule(ModuleInterface):
         if not planet_ranges:
             return None
 
-        # For each planet, query average mood and energy during its hours
+        # Fetch ALL non-oracle events for the day in ONE query (replaces 72+ queries)
+        all_events_rows = db.execute(
+            """
+            SELECT timestamp_local, source_module, event_type, value_numeric
+            FROM events
+            WHERE date(timestamp_local) = ?
+              AND source_module NOT LIKE 'oracle.%'
+            ORDER BY timestamp_local
+            """,
+            (date_str,),
+        ).fetchall()
+
+        # Build Python-side lists for fast filtering
+        all_events = [
+            (row[0], row[1], row[2], row[3]) for row in all_events_rows
+        ]
+
+        # For each planet, filter events by time ranges in Python
         activity = {}
         for planet, ranges in planet_ranges.items():
-            mood_vals = []
-            energy_vals = []
+            mood_vals: list[float] = []
+            energy_vals: list[float] = []
             event_count = 0
             for start, end in ranges:
-                # Count events during this planetary hour
-                cnt_row = db.execute(
-                    """
-                    SELECT COUNT(*) FROM events
-                    WHERE timestamp_local >= ? AND timestamp_local < ?
-                      AND date(timestamp_local) = ?
-                      AND source_module NOT LIKE 'oracle.%'
-                    """,
-                    (start, end, date_str),
-                ).fetchone()
-                event_count += cnt_row[0] if cnt_row else 0
-
-                # Get mood during this hour
-                mood_row = db.execute(
-                    """
-                    SELECT AVG(value_numeric) FROM events
-                    WHERE source_module IN ('mind.mood', 'mind.assessment')
-                      AND timestamp_local >= ? AND timestamp_local < ?
-                      AND date(timestamp_local) = ?
-                      AND value_numeric IS NOT NULL
-                    """,
-                    (start, end, date_str),
-                ).fetchone()
-                if mood_row and mood_row[0] is not None:
-                    mood_vals.append(mood_row[0])
-
-                # Get energy during this hour
-                energy_row = db.execute(
-                    """
-                    SELECT AVG(value_numeric) FROM events
-                    WHERE source_module IN ('mind.energy', 'mind.assessment')
-                      AND event_type LIKE '%energy%'
-                      AND timestamp_local >= ? AND timestamp_local < ?
-                      AND date(timestamp_local) = ?
-                      AND value_numeric IS NOT NULL
-                    """,
-                    (start, end, date_str),
-                ).fetchone()
-                if energy_row and energy_row[0] is not None:
-                    energy_vals.append(energy_row[0])
+                for ts_local, src_mod, evt_type, val_num in all_events:
+                    if ts_local < start or ts_local >= end:
+                        continue
+                    event_count += 1
+                    if val_num is not None:
+                        if src_mod in ("mind.mood", "mind.assessment"):
+                            mood_vals.append(val_num)
+                        if src_mod in ("mind.energy", "mind.assessment") and "energy" in (evt_type or ""):
+                            energy_vals.append(val_num)
 
             activity[planet] = {
                 "events_count": event_count,

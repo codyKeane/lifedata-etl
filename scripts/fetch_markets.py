@@ -14,14 +14,15 @@ Output: raw/api/markets/markets_YYYY-MM-DD.json
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-import requests
 from dotenv import load_dotenv
 
 # Project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+
+from scripts._http import retry_get
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
 
@@ -32,7 +33,7 @@ EIA_URL = "https://api.eia.gov/v2/petroleum/pri/gnd/data/"
 def fetch_bitcoin() -> dict | None:
     """Fetch Bitcoin price and 24h change from CoinGecko (no key)."""
     try:
-        resp = requests.get(
+        resp = retry_get(
             COINGECKO_URL,
             params={
                 "ids": "bitcoin",
@@ -52,7 +53,7 @@ def fetch_bitcoin() -> dict | None:
                 "indicator": "bitcoin",
                 "value_usd": round(price, 2),
                 "change_24h_pct": round(change, 2) if change is not None else None,
-                "fetched_utc": datetime.now(timezone.utc).isoformat(),
+                "fetched_utc": datetime.now(UTC).isoformat(),
             }
             print(
                 f"  [Bitcoin] ${result['value_usd']:,.2f} ({result['change_24h_pct']}%)"
@@ -70,7 +71,7 @@ def fetch_gas_price(api_key: str) -> dict | None:
         return None
 
     try:
-        resp = requests.get(
+        resp = retry_get(
             EIA_URL,
             params={
                 "api_key": api_key,
@@ -96,7 +97,7 @@ def fetch_gas_price(api_key: str) -> dict | None:
                 "indicator": "gas_price_avg",
                 "value_usd": round(value, 3),
                 "period": period,
-                "fetched_utc": datetime.now(timezone.utc).isoformat(),
+                "fetched_utc": datetime.now(UTC).isoformat(),
             }
             print(f"  [Gas] ${result['value_usd']}/gal (week of {period})")
             return result
@@ -106,7 +107,7 @@ def fetch_gas_price(api_key: str) -> dict | None:
 
 
 def main():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     eia_key = os.environ.get("EIA_API_KEY", "")
 
     print("Fetching market data...")

@@ -34,7 +34,7 @@ import math
 import os
 from collections import Counter
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -87,8 +87,8 @@ class BehaviorModule(ModuleInterface):
           2. spool/behavior/*.csv — unlock, steps, dream logs
         """
         from modules.behavior.parsers import (
-            SPOOL_PARSER_REGISTRY,
             APP_TRANSITION_PREFIX,
+            SPOOL_PARSER_REGISTRY,
         )
 
         files = []
@@ -127,8 +127,8 @@ class BehaviorModule(ModuleInterface):
     def parse(self, file_path: str) -> list[Event]:
         """Parse a single file using the appropriate parser."""
         from modules.behavior.parsers import (
-            SPOOL_PARSER_REGISTRY,
             APP_TRANSITION_PREFIX,
+            SPOOL_PARSER_REGISTRY,
             parse_app_transitions,
         )
 
@@ -152,9 +152,10 @@ class BehaviorModule(ModuleInterface):
         log.warning(f"No parser found for behavior file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute all derived behavioral metrics after ingestion.
 
+        Only recomputes for dates that had events ingested this run.
         Derived metrics computed per day:
           - App switch hourly_rate
           - Fragmentation index (0-100)
@@ -171,18 +172,21 @@ class BehaviorModule(ModuleInterface):
         derived_events = []
         baseline_days = self._config.get("baseline_window_days", 14)
 
-        # Get all dates with behavior data
-        rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_utc) as d
-            FROM events
-            WHERE source_module LIKE 'behavior.%'
-              AND source_module NOT LIKE '%.derived'
-            ORDER BY d
-            """
-        )
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
-        dates = [r[0] for r in result_set if r[0]]
+        if affected_dates is not None:
+            dates = sorted(affected_dates)
+        else:
+            # Fallback: recompute all dates
+            rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_utc) as d
+                FROM events
+                WHERE source_module LIKE 'behavior.%'
+                  AND source_module NOT LIKE '%.derived'
+                ORDER BY d
+                """
+            )
+            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            dates = [r[0] for r in result_set if r[0]]
 
         for date_str in dates:
             day_ts = f"{date_str}T23:59:00+00:00"
@@ -294,7 +298,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Fragmentation index ────────────────────────────────────
 
-    def _compute_fragmentation_index(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_fragmentation_index(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """0-100 scale of attention fragmentation.
 
         Components:
@@ -304,13 +308,15 @@ class BehaviorModule(ModuleInterface):
         """
         ceiling = self._config.get("fragmentation_ceiling", 60)
 
+        # Fetch transitions + timestamp range in ONE query (replaces 2 queries)
         rows = db.execute(
             """
-            SELECT value_json FROM events
+            SELECT value_json, timestamp_utc FROM events
             WHERE source_module = 'behavior.app_switch'
               AND event_type = 'transition'
               AND date(timestamp_utc) = ?
               AND value_json IS NOT NULL
+            ORDER BY timestamp_utc
             """,
             (date_str,),
         )
@@ -320,7 +326,12 @@ class BehaviorModule(ModuleInterface):
 
         dwells = []
         apps = []
+        ts_first: str | None = None
+        ts_last: str | None = None
         for row in result_set:
+            if ts_first is None:
+                ts_first = row[1]
+            ts_last = row[1]
             try:
                 data = json.loads(row[0])
                 dwell = data.get("dwell_sec", 0)
@@ -332,27 +343,14 @@ class BehaviorModule(ModuleInterface):
             except (json.JSONDecodeError, TypeError):
                 continue
 
-        if not dwells:
+        if not dwells or not ts_first or not ts_last:
             return None
 
         n_switches = len(dwells)
 
-        # Estimate active hours from first-to-last transition span
-        time_rows = db.execute(
-            """
-            SELECT MIN(timestamp_utc), MAX(timestamp_utc) FROM events
-            WHERE source_module = 'behavior.app_switch'
-              AND event_type = 'transition'
-              AND date(timestamp_utc) = ?
-            """,
-            (date_str,),
-        )
-        time_result = time_rows.fetchone() if hasattr(time_rows, "fetchone") else None
-        if not time_result or not time_result[0] or not time_result[1]:
-            return None
-
-        t_min = datetime.fromisoformat(time_result[0])
-        t_max = datetime.fromisoformat(time_result[1])
+        # Active hours from first-to-last transition span
+        t_min = datetime.fromisoformat(ts_first)
+        t_max = datetime.fromisoformat(ts_last)
         active_hours = max((t_max - t_min).total_seconds() / 3600, 1.0)
 
         switch_rate = n_switches / active_hours
@@ -397,7 +395,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Daily steps total ──────────────────────────────────────
 
-    def _compute_daily_steps(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_daily_steps(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Sum hourly step counts into a daily total."""
         rows = db.execute(
             """
@@ -440,7 +438,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Movement entropy ───────────────────────────────────────
 
-    def _compute_movement_entropy(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_movement_entropy(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Shannon entropy of hourly step distribution (0-1 normalized).
 
         High = steps spread evenly (active lifestyle).
@@ -505,7 +503,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Sedentary bouts ────────────────────────────────────────
 
-    def _compute_sedentary_bouts(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_sedentary_bouts(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Find consecutive waking hours with <threshold steps."""
         threshold = self._config.get("sedentary_threshold", 50)
         min_bout = self._config.get("sedentary_min_bout_hours", 2)
@@ -593,7 +591,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Unlock hourly summary ──────────────────────────────────
 
-    def _compute_unlock_summary(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_unlock_summary(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Summary stats for unlock latency over the day."""
         rows = db.execute(
             """
@@ -640,7 +638,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Dream frequency ────────────────────────────────────────
 
-    def _compute_dream_frequency(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_dream_frequency(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Rolling 7-day dream log count."""
         rows = db.execute(
             """
@@ -678,7 +676,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Attention span estimate ────────────────────────────────
 
-    def _compute_attention_span(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_attention_span(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Median app dwell time, excluding calls/media/launcher."""
         rows = db.execute(
             """
@@ -748,7 +746,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Morning inertia ────────────────────────────────────────
 
-    def _compute_morning_inertia(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
+    def _compute_morning_inertia(self, db: Database, date_str: str, day_ts: str) -> Event | None:
         """Minutes from first screen_on to first productive app usage.
 
         Uses the same productive_keywords as the social module's
@@ -844,71 +842,103 @@ class BehaviorModule(ModuleInterface):
 
     def _compute_digital_restlessness(
         self, db: Database, date_str: str, day_ts: str, baseline_days: int
-    ) -> Optional[Event]:
+    ) -> Event | None:
         """Composite z-score: app switches + unlock frequency + screen time.
 
         Weights: frag × 0.4, unlocks × 0.3, screen_time × 0.3.
         Requires at least 7 days of baseline data.
         """
         # Today's values
-        frag_val = self._get_today_metric(
-            db, date_str, "behavior.app_switch.derived", "fragmentation_index"
-        )
-        unlock_rows = db.execute(
+        # Fetch today's values for all three components in ONE query
+        today_rows = db.execute(
             """
-            SELECT COUNT(*) FROM events
+            SELECT source_module, event_type, value_numeric, NULL as cnt
+            FROM events
+            WHERE date(timestamp_utc) = ?
+              AND value_numeric IS NOT NULL
+              AND (
+                  (source_module = 'behavior.app_switch.derived' AND event_type = 'fragmentation_index')
+                  OR (source_module = 'device.derived' AND event_type = 'screen_time_minutes')
+              )
+            UNION ALL
+            SELECT 'behavior.unlock', 'latency', NULL, COUNT(*)
+            FROM events
             WHERE source_module = 'behavior.unlock'
               AND event_type = 'latency'
               AND date(timestamp_utc) = ?
             """,
-            (date_str,),
-        )
-        unlock_result = unlock_rows.fetchone()
-        unlock_count = unlock_result[0] if unlock_result else 0
+            (date_str, date_str),
+        ).fetchall()
 
-        screen_rows = db.execute(
+        frag_val: float | None = None
+        unlock_count = 0
+        screen_min: float | None = None
+        for src, etype, val, cnt in today_rows:
+            if src == "behavior.app_switch.derived" and etype == "fragmentation_index":
+                frag_val = val
+            elif src == "device.derived" and etype == "screen_time_minutes":
+                screen_min = val
+            elif src == "behavior.unlock":
+                unlock_count = cnt or 0
+
+        # Fetch ALL baseline values in ONE query (replaces 3 separate queries)
+        baseline_rows = db.execute(
             """
-            SELECT value_numeric FROM events
-            WHERE source_module = 'device.derived'
-              AND event_type = 'screen_time_minutes'
-              AND date(timestamp_utc) = ?
+            SELECT source_module, event_type, value_numeric
+            FROM events
+            WHERE value_numeric IS NOT NULL
+              AND date(timestamp_utc) BETWEEN date(?, ? || ' days') AND date(?, '-1 day')
+              AND (
+                  (source_module = 'behavior.app_switch.derived' AND event_type = 'fragmentation_index')
+                  OR (source_module = 'device.derived' AND event_type = 'screen_time_minutes')
+              )
             """,
-            (date_str,),
-        )
-        screen_result = (
-            screen_rows.fetchone() if hasattr(screen_rows, "fetchone") else None
-        )
-        screen_min = screen_result[0] if screen_result and screen_result[0] else None
+            (date_str, str(-baseline_days), date_str),
+        ).fetchall()
 
-        components = {}
+        # Also fetch baseline unlock daily counts
+        baseline_unlock_rows = db.execute(
+            """
+            SELECT date(timestamp_utc) as d, COUNT(*) as cnt
+            FROM events
+            WHERE source_module = 'behavior.unlock'
+              AND event_type = 'latency'
+              AND date(timestamp_utc) BETWEEN date(?, ? || ' days') AND date(?, '-1 day')
+            GROUP BY d
+            """,
+            (date_str, str(-baseline_days), date_str),
+        ).fetchall()
 
-        # Z-score each component against baseline
+        # Bucket baseline values by (source_module, event_type)
+        baseline_frag = [r[2] for r in baseline_rows
+                         if r[0] == "behavior.app_switch.derived" and r[1] == "fragmentation_index"]
+        baseline_screen = [r[2] for r in baseline_rows
+                           if r[0] == "device.derived" and r[1] == "screen_time_minutes"]
+        baseline_unlocks = [r[1] for r in baseline_unlock_rows if r[1] is not None]
+
+        def _zscore(today_val: float, baseline: list[float]) -> float | None:
+            if len(baseline) < 7:
+                return None
+            mean_val = sum(baseline) / len(baseline)
+            std_val = math.sqrt(sum((x - mean_val) ** 2 for x in baseline) / len(baseline))
+            if std_val < 0.01:
+                return None
+            return float((today_val - mean_val) / std_val)
+
+        components: dict[str, float] = {}
+
         if frag_val is not None:
-            z = self._zscore_against_baseline(
-                db,
-                date_str,
-                baseline_days,
-                frag_val,
-                "behavior.app_switch.derived",
-                "fragmentation_index",
-            )
+            z = _zscore(frag_val, baseline_frag)
             if z is not None:
                 components["frag"] = z
 
         if unlock_count > 0:
-            z = self._zscore_unlock_count(db, date_str, baseline_days, unlock_count)
+            z = _zscore(float(unlock_count), baseline_unlocks)
             if z is not None:
                 components["unlocks"] = z
 
         if screen_min is not None:
-            z = self._zscore_against_baseline(
-                db,
-                date_str,
-                baseline_days,
-                screen_min,
-                "device.derived",
-                "screen_time_minutes",
-            )
+            z = _zscore(screen_min, baseline_screen)
             if z is not None:
                 components["screen"] = z
 
@@ -944,7 +974,7 @@ class BehaviorModule(ModuleInterface):
 
     def _compute_behavioral_consistency(
         self, db: Database, date_str: str, day_ts: str, baseline_days: int
-    ) -> Optional[Event]:
+    ) -> Event | None:
         """Std of today's hourly activity pattern vs 14-day profile.
 
         Low score = routine is consistent = healthy.
@@ -1037,7 +1067,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Helper methods ─────────────────────────────────────────
 
-    def _get_today_metric(self, db: Database, date_str: str, source_module: str, event_type: str) -> Optional[float]:
+    def _get_today_metric(self, db: Database, date_str: str, source_module: str, event_type: str) -> float | None:
         """Get today's value for a specific derived metric."""
         rows = db.execute(
             """
@@ -1060,7 +1090,7 @@ class BehaviorModule(ModuleInterface):
         today_val: float,
         source_module: str,
         event_type: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Z-score today's value against a rolling baseline."""
         rows = db.execute(
             """
@@ -1086,7 +1116,7 @@ class BehaviorModule(ModuleInterface):
 
     def _zscore_unlock_count(
         self, db: Database, date_str: str, baseline_days: int, today_count: int
-    ) -> Optional[float]:
+    ) -> float | None:
         """Z-score today's unlock count against baseline daily counts."""
         rows = db.execute(
             """

@@ -34,7 +34,7 @@ def parse_app_transitions(file_path: str) -> list[Event]:
     prev_epoch = None
     prev_app = None
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -100,7 +100,7 @@ def parse_unlock_latency(file_path: str) -> list[Event]:
     CSV format: epoch,time_local,timezone,latency_ms,first_app
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -162,7 +162,7 @@ def parse_hourly_steps(file_path: str) -> list[Event]:
     CSV format: epoch,time_local,timezone,hourly_steps,cumulative_counter
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -225,7 +225,7 @@ def parse_dream_quicklog(file_path: str) -> list[Event]:
     CSV format: epoch,time_local,timezone,vividness,tone,keywords,themes
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -297,7 +297,7 @@ def parse_dream_structured(file_path: str) -> list[Event]:
     CSV format: epoch,time_local,timezone,setting,characters,actions,emotion,connection
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:

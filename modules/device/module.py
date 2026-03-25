@@ -11,7 +11,7 @@ Implements the ModuleInterface contract.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from core.event import Event
@@ -114,11 +114,11 @@ class DeviceModule(ModuleInterface):
         log.warning(f"No parser found for device file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived device metrics after ingestion.
 
-        Processes all dates that have device events (not just today),
-        ensuring derived metrics are computed for backfilled data.
+        Only recomputes for dates that had events ingested this run
+        (via affected_dates). Falls back to all dates if not provided.
 
         Derived metrics per day:
           - device.derived/unlock_count: number of screen_on events
@@ -126,21 +126,26 @@ class DeviceModule(ModuleInterface):
           - device.derived/charging_duration: total minutes on charger
           - device.derived/battery_drain_rate: avg %/hour drain (non-charging)
         """
-        now_utc = datetime.now(timezone.utc).isoformat()
+        now_utc = datetime.now(UTC).isoformat()
 
-        # Find all dates that have device events
-        date_rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_local) as d FROM events
-            WHERE source_module LIKE 'device.%'
-              AND source_module != 'device.derived'
-            ORDER BY d
-            """
-        ).fetchall()
+        if affected_dates is not None:
+            # Only recompute for dates that changed this run
+            days = sorted(affected_dates)
+        else:
+            # Fallback: recompute all dates (backward compatibility)
+            date_rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_local) as d FROM events
+                WHERE source_module LIKE 'device.%'
+                  AND source_module != 'device.derived'
+                ORDER BY d
+                """
+            ).fetchall()
+            days = [row[0] for row in date_rows]
 
         all_derived: list[Event] = []
 
-        for (day,) in date_rows:
+        for day in days:
             day_derived = self._compute_day_metrics(db, day, now_utc)
             all_derived.extend(day_derived)
 
@@ -202,9 +207,9 @@ class DeviceModule(ModuleInterface):
                     t1 = datetime.fromisoformat(screen_rows[i][0])
                     t2 = datetime.fromisoformat(screen_rows[i + 1][0])
                     if t1.tzinfo is None:
-                        t1 = t1.replace(tzinfo=timezone.utc)
+                        t1 = t1.replace(tzinfo=UTC)
                     if t2.tzinfo is None:
-                        t2 = t2.replace(tzinfo=timezone.utc)
+                        t2 = t2.replace(tzinfo=UTC)
                     gap_min = (t2 - t1).total_seconds() / 60
                     total_screen_min += min(gap_min, max_session_min)
                 except (ValueError, TypeError):
@@ -265,9 +270,9 @@ class DeviceModule(ModuleInterface):
                         dt_start = datetime.fromisoformat(last_start_ts)
                         dt_stop = datetime.fromisoformat(ts)
                         if dt_start.tzinfo is None:
-                            dt_start = dt_start.replace(tzinfo=timezone.utc)
+                            dt_start = dt_start.replace(tzinfo=UTC)
                         if dt_stop.tzinfo is None:
-                            dt_stop = dt_stop.replace(tzinfo=timezone.utc)
+                            dt_stop = dt_stop.replace(tzinfo=UTC)
                         dur_min = (dt_stop - dt_start).total_seconds() / 60
                         if 0 < dur_min < 1440:
                             total_charge_min += dur_min
@@ -330,10 +335,7 @@ class DeviceModule(ModuleInterface):
                     last_cs = None
 
             def _is_during_charging(ts_str: str) -> bool:
-                for cs_start, cs_end in charge_intervals:
-                    if cs_start <= ts_str <= cs_end:
-                        return True
-                return False
+                return any(cs_start <= ts_str <= cs_end for cs_start, cs_end in charge_intervals)
 
             drain_segments: list[float] = []
             for i in range(len(batt_rows) - 1):
@@ -345,9 +347,9 @@ class DeviceModule(ModuleInterface):
                     dt1 = datetime.fromisoformat(ts1)
                     dt2 = datetime.fromisoformat(ts2)
                     if dt1.tzinfo is None:
-                        dt1 = dt1.replace(tzinfo=timezone.utc)
+                        dt1 = dt1.replace(tzinfo=UTC)
                     if dt2.tzinfo is None:
-                        dt2 = dt2.replace(tzinfo=timezone.utc)
+                        dt2 = dt2.replace(tzinfo=UTC)
                     hours = (dt2 - dt1).total_seconds() / 3600
                     if hours > 0 and pct2 < pct1:
                         drain_segments.append((pct1 - pct2) / hours)

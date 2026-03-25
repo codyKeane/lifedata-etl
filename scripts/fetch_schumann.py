@@ -20,7 +20,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -29,11 +29,12 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "raw", "api", "schumann")
 
 # Attempt to import requests; skip gracefully if unavailable
 try:
-    import requests
+    import requests  # noqa: F401 — import probe for availability
 except ImportError:
     print("requests not installed — cannot fetch Schumann data.")
     sys.exit(0)
 
+from scripts._http import retry_get
 
 SOURCES = [
     {
@@ -80,7 +81,7 @@ def fetch_schumann() -> dict | None:
     """Try each source in priority order."""
     for source in SOURCES:
         try:
-            resp = requests.get(
+            resp = retry_get(
                 source["url"],
                 timeout=15,
                 headers={"User-Agent": "LifeData/4.0 (personal research)"},
@@ -93,7 +94,7 @@ def fetch_schumann() -> dict | None:
                 data = parse_heartmath(resp)
                 if data:
                     data["source"] = source["name"]
-                    data["fetched_utc"] = datetime.now(timezone.utc).isoformat()
+                    data["fetched_utc"] = datetime.now(UTC).isoformat()
                     return data
 
         except Exception as e:
@@ -106,7 +107,7 @@ def fetch_schumann() -> dict | None:
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     print(f"Fetching Schumann resonance data at {now.isoformat()}")
 
     data = fetch_schumann()

@@ -16,7 +16,6 @@ CSV Formats (refactored Tasker tasks):
   Evening (manual):   epoch,date,time,day_rating,stress,productivity,social,manual
 """
 
-from typing import Optional
 
 from core.event import Event
 from core.logger import get_logger
@@ -35,7 +34,7 @@ MORNING_FIELDS = ["sleep_quality", "dream_recall", "mood", "energy"]
 EVENING_FIELDS = ["day_rating", "stress", "productivity", "social_satisfaction"]
 
 
-def _parse_csv_line(line: str) -> Optional[list[str]]:
+def _parse_csv_line(line: str) -> list[str] | None:
     """Split a CSV line into fields, returning None for blank/malformed lines."""
     line = line.strip()
     if not line:
@@ -70,7 +69,7 @@ def parse_morning(file_path: str) -> list[Event]:
       - mind.energy / check_in     (energy score as value_numeric)
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             fields = _parse_csv_line(line)
             if not fields:
@@ -187,7 +186,7 @@ def parse_evening(file_path: str) -> list[Event]:
       - mind.stress  / check_in    (stress level as value_numeric)
     """
     events = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_num, line in enumerate(f, 1):
             fields = _parse_csv_line(line)
             if not fields:

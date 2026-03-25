@@ -9,7 +9,7 @@ SMS, app usage, and WiFi connectivity.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from core.event import Event
@@ -99,25 +99,30 @@ class SocialModule(ModuleInterface):
         log.warning(f"No parser found for social file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived social metrics after ingestion.
 
-        Processes all dates with social events. Derived metrics per day:
+        Only recomputes for dates that had events ingested this run.
+        Derived metrics per day:
           - social.derived/density_score: weighted human interaction score
           - social.derived/digital_hygiene: productive vs distraction app ratio
           - social.derived/notification_load: notifications per active hour
         """
-        date_rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_local) as d FROM events
-            WHERE source_module LIKE 'social.%'
-              AND source_module != 'social.derived'
-            ORDER BY d
-            """
-        ).fetchall()
+        if affected_dates is not None:
+            days = sorted(affected_dates)
+        else:
+            date_rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_local) as d FROM events
+                WHERE source_module LIKE 'social.%'
+                  AND source_module != 'social.derived'
+                ORDER BY d
+                """
+            ).fetchall()
+            days = [row[0] for row in date_rows]
 
         all_derived: list[Event] = []
-        for (day,) in date_rows:
+        for day in days:
             all_derived.extend(self._compute_day_metrics(db, day))
 
         if all_derived:
@@ -290,9 +295,9 @@ class SocialModule(ModuleInterface):
                     dt_first = datetime.fromisoformat(notif_times[0])
                     dt_last = datetime.fromisoformat(notif_times[1])
                     if dt_first.tzinfo is None:
-                        dt_first = dt_first.replace(tzinfo=timezone.utc)
+                        dt_first = dt_first.replace(tzinfo=UTC)
                     if dt_last.tzinfo is None:
-                        dt_last = dt_last.replace(tzinfo=timezone.utc)
+                        dt_last = dt_last.replace(tzinfo=UTC)
                     active_hours = (dt_last - dt_first).total_seconds() / 3600
                     if active_hours < 1:
                         active_hours = 1.0  # minimum 1 hour

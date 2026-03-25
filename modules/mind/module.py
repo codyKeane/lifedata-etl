@@ -109,25 +109,30 @@ class MindModule(ModuleInterface):
         log.warning(f"No parser found for mind file: {basename}")
         return []
 
-    def post_ingest(self, db: Database) -> None:
+    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
         """Compute derived mind metrics after ingestion.
 
-        Processes all dates with mind events. Derived metrics per day:
+        Only recomputes for dates that had events ingested this run.
+        Derived metrics per day:
           - mind.derived/subjective_day_score: weighted composite of ratings
           - mind.derived/mood_trend_7d: 7-day rolling average of mood
           - mind.derived/energy_stability: coefficient of variation over 7 days
         """
-        date_rows = db.execute(
-            """
-            SELECT DISTINCT date(timestamp_local) as d FROM events
-            WHERE source_module LIKE 'mind.%'
-              AND source_module != 'mind.derived'
-            ORDER BY d
-            """
-        ).fetchall()
+        if affected_dates is not None:
+            days = sorted(affected_dates)
+        else:
+            date_rows = db.execute(
+                """
+                SELECT DISTINCT date(timestamp_local) as d FROM events
+                WHERE source_module LIKE 'mind.%'
+                  AND source_module != 'mind.derived'
+                ORDER BY d
+                """
+            ).fetchall()
+            days = [row[0] for row in date_rows]
 
         all_derived: list[Event] = []
-        for (day,) in date_rows:
+        for day in days:
             all_derived.extend(self._compute_day_metrics(db, day))
 
         if all_derived:
@@ -318,7 +323,7 @@ class MindModule(ModuleInterface):
             return None
 
         summary = {}
-        for source, etype, val_num, val_json in rows:
+        for source, etype, _val_num, val_json in rows:
             if etype == "assessment" and val_json:
                 import json
 

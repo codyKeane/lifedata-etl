@@ -11,8 +11,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 # Maximum field lengths to prevent database bloat from malformed input
 MAX_VALUE_TEXT_LEN = 50_000
@@ -50,23 +49,23 @@ class Event:
     timezone_offset: str
     source_module: str
     event_type: str
-    value_numeric: Optional[float] = None
-    value_text: Optional[str] = None
-    value_json: Optional[str] = None
-    tags: Optional[str] = None
-    location_lat: Optional[float] = None
-    location_lon: Optional[float] = None
-    media_ref: Optional[str] = None
+    value_numeric: float | None = None
+    value_text: str | None = None
+    value_json: str | None = None
+    tags: str | None = None
+    location_lat: float | None = None
+    location_lon: float | None = None
+    media_ref: str | None = None
     confidence: float = 1.0
-    parser_version: Optional[str] = None
+    parser_version: str | None = None
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     # Ephemeral provenance trace — NOT stored in the database.
     # Set by safe_parse_rows() for debugging: which file, line, and parser
     # produced this event.  Example:
     #   "file=screen_2026-03-22.csv:line=47:parser=device:v=1.0.0"
-    provenance: Optional[str] = None
+    provenance: str | None = None
 
     @property
     def raw_source_id(self) -> str:
@@ -170,9 +169,9 @@ class Event:
 
     def to_db_tuple(self) -> tuple[
         str, str, str, str, str, str,
-        Optional[float], Optional[str], Optional[str], Optional[str],
-        Optional[float], Optional[float], Optional[str], float,
-        str, Optional[str], str,
+        float | None, str | None, str | None, str | None,
+        float | None, float | None, str | None, float,
+        str, str | None, str,
     ]:
         """Return a tuple matching the INSERT column order for the events table.
 
