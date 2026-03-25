@@ -1,5 +1,29 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Parser Tests for All Implemented Modules
+
+**Task:** Create parser tests for every module with `parsers.py`, covering happy paths, malformed input, and timezone_offset verification.
+
+**Analysis:** Found 4 existing test files (device, mind, social, environment) and 6 missing (body, world, media, behavior, cognition, oracle). Existing files also had gaps vs directives.
+
+**Changes made:**
+- Created 6 new test files: `tests/modules/{body,world,media,behavior,cognition,oracle}/test_parsers.py` with `__init__.py` files
+- Updated `tests/modules/device/test_parsers.py`: added 5 tests (10-row happy path, truncated file, zero-byte file, missing columns, bad timestamp)
+- Updated `tests/modules/environment/test_parsers.py`: added 3 sensor summary test classes (barometer, light, magnetometer) with timezone_offset verification
+- Fixed `.gitignore`: changed `media/` to `/media/` so `tests/modules/media/` is not ignored
+
+**Test coverage by module (new):**
+- body: 10 parser functions → quicklog, samsung_health, sleep, reaction, movement/activity/pedometer summaries (39 tests)
+- world: 4 parsers → news, markets, RSS, GDELT JSON (26 tests)
+- media: 3 parsers → voice_meta, photo_meta, video_meta + media ID safety (23 tests)
+- behavior: 5 parsers → app_transitions, unlock_latency, hourly_steps, dream_quicklog, dream_structured (37 tests)
+- cognition: 7 parsers → simple_rt, choice_rt, gonogo, digit_span, time_production, time_estimation, typing_speed (36 tests)
+- oracle: 6 parsers → iching_casting, iching_auto, rng_samples, rng_raw, schumann, planetary_hours (31 tests)
+
+**Result:** 501 total tests pass in 0.44s. Commit `183f881` on `dev`.
+
+---
+
 ## 2026-03-24 — Audit: Core Unit Tests vs Task Directives
 
 **Task:** Re-analyze task directives for core unit tests against current repository state.
