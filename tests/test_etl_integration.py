@@ -557,29 +557,30 @@ class TestETLLockfile:
     def test_run_etl_lock_mechanism(self, tmp_path):
         """Verify the actual _acquire_lock function from run_etl.py
         respects the flock mechanism."""
-        # Simulate the lock file path used by run_etl.py
         import run_etl
 
-        # Temporarily override LOCK_FILE to use our tmp_path
+        # Temporarily override LOCK_FILE and timeout to speed up the test
         original_lock = run_etl.LOCK_FILE
+        original_timeout = run_etl.LOCK_TIMEOUT_SECONDS
         run_etl.LOCK_FILE = str(tmp_path / ".etl_test.lock")
+        run_etl.LOCK_TIMEOUT_SECONDS = 0.5  # fast timeout for test
 
         try:
             # First acquisition should succeed
             lock_fd = run_etl._acquire_lock()
             assert lock_fd is not None
 
-            # Second acquisition should raise SystemExit(3)
+            # Second acquisition should raise SystemExit(1) after timeout
             with pytest.raises(SystemExit) as exc_info:
                 run_etl._acquire_lock()
-            assert exc_info.value.code == 3
+            assert exc_info.value.code == 1
 
             # Clean up
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
         finally:
             run_etl.LOCK_FILE = original_lock
-            # Clean up lock file
+            run_etl.LOCK_TIMEOUT_SECONDS = original_timeout
             try:
                 os.unlink(str(tmp_path / ".etl_test.lock"))
             except OSError:

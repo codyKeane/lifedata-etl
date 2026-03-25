@@ -345,6 +345,20 @@ class ScheduleConfig(BaseModel):
     analysis_cron: str = ""
 
 
+# ── ETL engine settings ────────────────────────────────────────
+
+
+class EtlConfig(BaseModel):
+    file_stability_seconds: int = 60
+
+    @field_validator("file_stability_seconds")
+    @classmethod
+    def stability_range(cls, v: int) -> int:
+        if v < 0 or v > 600:
+            raise ValueError(f"file_stability_seconds={v} — must be 0–600")
+        return v
+
+
 # ── Top-level ───────────────────────────────────────────────────
 
 
@@ -361,6 +375,7 @@ class LifeDataConfig(BaseModel):
     analysis: AnalysisConfig = AnalysisConfig()
     retention: RetentionConfig = RetentionConfig()
     schedule: ScheduleConfig = ScheduleConfig()
+    etl: EtlConfig = EtlConfig()
 
 
 class RootConfig(BaseModel):

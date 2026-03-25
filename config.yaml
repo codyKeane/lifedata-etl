@@ -169,6 +169,14 @@ lifedata:
       planetary_hours_tag_events: true
 
   # ──────────────────────────────────────────────────────────
+  # ETL engine settings
+  # ──────────────────────────────────────────────────────────
+  etl:
+    # Skip files whose mtime is less than this many seconds ago.
+    # Prevents parsing Syncthing partial writes (mid-sync protection).
+    file_stability_seconds: 60
+
+  # ──────────────────────────────────────────────────────────
   # Analysis settings
   # ──────────────────────────────────────────────────────────
   analysis:

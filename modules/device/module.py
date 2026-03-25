@@ -15,7 +15,7 @@ from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_float, safe_json
-from modules.device.parsers import PARSER_REGISTRY
+from modules.device.parsers import PARSER_REGISTRY, SAFE_PARSER_REGISTRY
 
 log = get_logger("lifedata.device")
 
@@ -25,6 +25,7 @@ class DeviceModule(ModuleInterface):
 
     def __init__(self, config: dict | None = None):
         self._config = config or {}
+        self._quarantined_files: list[str] = []
 
     @property
     def module_id(self) -> str:
@@ -86,16 +87,23 @@ class DeviceModule(ModuleInterface):
 
         return unique
 
+    @property
+    def quarantined_files(self) -> list[str]:
+        """Files quarantined during parsing (>50% rows skipped)."""
+        return list(self._quarantined_files)
+
     def parse(self, file_path: str) -> list[Event]:
-        """Parse a single device CSV file using the appropriate parser."""
+        """Parse a single device CSV file using the appropriate safe parser."""
         basename = os.path.basename(file_path)
 
-        for prefix, parser_fn in PARSER_REGISTRY.items():
+        for prefix, parser_fn in SAFE_PARSER_REGISTRY.items():
             if basename.startswith(prefix):
-                events = parser_fn(file_path)
-                if events:
-                    log.info(f"Parsed {len(events)} events from {basename}")
-                return events
+                result = parser_fn(file_path)
+                if result.quarantined:
+                    self._quarantined_files.append(file_path)
+                if result.events:
+                    log.info(f"Parsed {len(result.events)} events from {basename}")
+                return result.events
 
         log.warning(f"No parser found for device file: {basename}")
         return []

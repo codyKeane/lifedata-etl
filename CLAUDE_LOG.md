@@ -1,5 +1,53 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Reliability Mechanisms: Lockfile, File Stability, Parser Degradation
+
+**Task:** Implement three reliability mechanisms in the ETL pipeline and test them.
+
+**Changes made:**
+
+### 1. Lockfile with 5-second timeout (`run_etl.py`)
+- Changed `_acquire_lock()` from non-blocking immediate fail to a retry loop with configurable `LOCK_TIMEOUT_SECONDS = 5`
+- Retries every 0.25s until the timeout, then prints "ETL already running (lockfile held). Exiting." and `sys.exit(1)`
+- Still uses `fcntl.flock` (crash-safe — lock released when fd closed), not PID files
+- Exit code changed from 3 to 1
+
+### 2. Configurable file stability check (`config_schema.py`, `config.yaml`, `orchestrator.py`)
+- Added `EtlConfig` pydantic model with `file_stability_seconds: int = 60` (range 0–600)
+- Added `etl` field to `LifeDataConfig` (defaults to 60s if section missing from YAML)
+- Added `etl:` section to `config.yaml` with documentation
+- Orchestrator now reads `self.config.lifedata.etl.file_stability_seconds` instead of hardcoded `FILE_STABILITY_SECONDS = 60`
+- Setting to 0 effectively disables the check
+
+### 3. Graceful parser degradation (`core/parser_utils.py`, `modules/device/parsers.py`, `orchestrator.py`)
+- **New file `core/parser_utils.py`**: `safe_parse_rows(filepath, parse_fn, module_id) → ParseResult`
+  - Iterates CSV rows, calls `parse_fn(fields, line_num)` per row
+  - Catches exceptions per-row, logs filename/line_num/raw content (truncated 200 chars)/exception
+  - Tracks skip count; quarantines file if >50% rows skipped
+  - Returns `ParseResult(events, skipped, total_rows, quarantined, filepath)`
+- **Refactored `modules/device/parsers.py`**: All 4 parsers (battery, screen, charging, bluetooth) now use `safe_parse_rows`
+  - Row-level logic extracted to `_parse_*_row(fields, line_num) → Event | None`
+  - Both `parse_*()` (returns `list[Event]`) and `parse_*_safe()` (returns `ParseResult`) APIs available
+  - `SAFE_PARSER_REGISTRY` added alongside existing `PARSER_REGISTRY`
+- **Device module** (`modules/device/module.py`): Uses `SAFE_PARSER_REGISTRY`, tracks `_quarantined_files`, exposes `quarantined_files` property
+- **Orchestrator**: Collects quarantined files from modules into `all_quarantined` list, included in run summary as `quarantined_files`
+
+### Tests (`tests/test_reliability.py` — 29 tests)
+
+| Class | Tests | Coverage |
+|---|---|---|
+| `TestLockfileTimeout` | 4 | Successful acquisition, exit(1) on held lock, crash-safe fd close, exit message content |
+| `TestFileStabilityConfig` | 7 | EtlConfig defaults/custom/zero/negative/over-600, LifeDataConfig integration, orchestrator uses config value |
+| `TestSafeParseRows` | 11 | Happy path, None skip, exception skip, quarantine >50%, not quarantined at 50%, empty file, blank lines, list return, nonexistent file, filepath in result |
+| `TestDeviceParsersSafeRefactor` | 7 | Battery/screen/charging/bluetooth v4, battery v3 unresolved vars, corrupt file, quarantine with crashing rows |
+| `TestQuarantineInOrchestrator` | 1 | quarantined_files key present in summary |
+
+**Updated:** `tests/test_etl_integration.py` — lockfile test updated for exit code 1 (was 3), timeout patched for fast tests.
+
+**Test results:** 538/538 passed in 1.81s (29 new + 509 existing).
+
+---
+
 ## 2026-03-24 — ETL Integration Tests
 
 **Task:** Create `tests/test_etl_integration.py` — end-to-end tests that run the actual Orchestrator against synthetic data in temporary directories.

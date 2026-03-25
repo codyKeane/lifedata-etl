@@ -30,23 +30,38 @@ from core.orchestrator import Orchestrator
 LOCK_FILE = os.path.expanduser("~/LifeData/.etl.lock")
 
 
+LOCK_TIMEOUT_SECONDS = 5
+
+
 def _acquire_lock():
     """Acquire an exclusive flock on the ETL lock file.
 
+    Retries for up to LOCK_TIMEOUT_SECONDS before giving up. This avoids
+    false failures from momentary lock contention (e.g. overlapping cron
+    triggers that start within the same second).
+
     Returns the open file descriptor (must stay open for the lock to hold).
-    Raises SystemExit if another ETL process is already running.
+    Raises SystemExit(1) if the lock cannot be acquired within the timeout.
     """
+    import time
+
     lock_fd = open(LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        lock_fd.close()
-        print(
-            "FATAL: Another ETL process is already running (could not acquire "
-            f"flock on {LOCK_FILE}). Exiting to prevent concurrent writes.",
-            file=sys.stderr,
-        )
-        sys.exit(3)
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break  # acquired
+        except OSError:
+            if time.monotonic() >= deadline:
+                lock_fd.close()
+                print(
+                    "ETL already running (lockfile held). Exiting.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            time.sleep(0.25)
+
     # Write PID for debugging
     lock_fd.write(str(os.getpid()))
     lock_fd.flush()

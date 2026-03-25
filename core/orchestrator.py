@@ -26,9 +26,6 @@ log = get_logger("lifedata.orchestrator")
 # Allowed file extensions for module parsing
 ALLOWED_EXTENSIONS = {".csv", ".json"}
 
-# Skip files modified within this many seconds (Syncthing mid-sync protection)
-FILE_STABILITY_SECONDS = 60
-
 
 class Orchestrator:
     """Main ETL execution engine."""
@@ -183,7 +180,9 @@ class Orchestrator:
         total_skipped = 0
         failed_modules: list[str] = []
         module_metrics: dict[str, dict] = {}
+        all_quarantined: list[str] = []
         raw_base = os.path.expanduser(self.config.lifedata.raw_base)
+        stability_seconds = self.config.lifedata.etl.file_stability_seconds
 
         for module in self.modules:
             log.info(f"[{module.module_id}] Starting module run")
@@ -217,7 +216,7 @@ class Orchestrator:
                     # file produces corrupt data or truncated rows)
                     try:
                         mtime = os.path.getmtime(f)
-                        if (now - mtime) < FILE_STABILITY_SECONDS:
+                        if (now - mtime) < stability_seconds:
                             log.info(
                                 f"[{module.module_id}] Skipping unstable file "
                                 f"(modified {now - mtime:.0f}s ago): {f}"
@@ -235,7 +234,7 @@ class Orchestrator:
                     + (f" ({rejected} rejected)" if rejected else "")
                     + (
                         f" ({unstable_count} deferred — modified within "
-                        f"{FILE_STABILITY_SECONDS}s)"
+                        f"{stability_seconds}s)"
                         if unstable_count
                         else ""
                     )
@@ -271,6 +270,15 @@ class Orchestrator:
                     f"[{module.module_id}] Ingested {inserted} events"
                     + (f" ({skipped} invalid skipped)" if skipped else "")
                 )
+
+                # Collect quarantined files from modules that support it
+                if hasattr(module, "quarantined_files"):
+                    qfiles = module.quarantined_files
+                    if qfiles:
+                        all_quarantined.extend(qfiles)
+                        log.warning(
+                            f"[{module.module_id}] {len(qfiles)} file(s) quarantined"
+                        )
 
                 # Post-ingest hooks (isolated — a hook crash should not
                 # undo successfully inserted events)
@@ -344,6 +352,7 @@ class Orchestrator:
             "failed_modules": failed_modules,
             "modules_run": len(self.modules),
             "affected_dates": sorted(self.db.get_affected_dates()),
+            "quarantined_files": all_quarantined,
         }
 
         log.info("=" * 60)
