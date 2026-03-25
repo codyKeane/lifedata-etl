@@ -11,6 +11,8 @@ import importlib
 import json
 import os
 import shutil
+import stat
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,8 +45,111 @@ class Orchestrator:
         # Set up structured logging now that we have the config
         setup_logging(self.config.lifedata.log_path)
 
+        # Security hardening checks (warnings only — never block ETL)
+        self._check_startup_security(config_path)
+
         self.db = Database(self.config.lifedata.db_path)
         self.modules: list[ModuleInterface] = []
+
+    def _check_startup_security(self, config_path: str) -> list[str]:
+        """Run security posture checks at startup. Returns list of warnings.
+
+        These are advisory — they log warnings but never prevent the ETL
+        from running. The threat model documents why each check matters.
+        """
+        warnings: list[str] = []
+
+        # 1. .env file permissions should be 0600
+        env_path = os.path.expanduser("~/LifeData/.env")
+        if os.path.exists(env_path):
+            mode = os.stat(env_path).st_mode & 0o777
+            if mode != 0o600:
+                msg = f".env permissions are {oct(mode)} (should be 0o600)"
+                warnings.append(msg)
+                log.warning(f"SECURITY: {msg}")
+
+        # 2. config.yaml permissions should be 0600 or 0644
+        cfg_expanded = os.path.expanduser(config_path)
+        if os.path.exists(cfg_expanded):
+            mode = os.stat(cfg_expanded).st_mode & 0o777
+            if mode not in (0o600, 0o644):
+                msg = f"config.yaml permissions are {oct(mode)} (should be 0o600 or 0o644)"
+                warnings.append(msg)
+                log.warning(f"SECURITY: {msg}")
+
+        # 3. ~/LifeData/ directory permissions should be 0700
+        lifedata_dir = os.path.expanduser("~/LifeData")
+        if os.path.isdir(lifedata_dir):
+            mode = os.stat(lifedata_dir).st_mode & 0o777
+            if mode != 0o700:
+                msg = f"~/LifeData/ permissions are {oct(mode)} (should be 0o700)"
+                warnings.append(msg)
+                log.warning(f"SECURITY: {msg}")
+
+        # 4. ~/LifeData/ should NOT be inside a Syncthing shared folder
+        # Syncthing creates a .stfolder/ marker in shared directories
+        stfolder = os.path.join(lifedata_dir, ".stfolder")
+        if os.path.exists(stfolder):
+            msg = (
+                "~/LifeData/ contains .stfolder/ — it appears to be a "
+                "Syncthing shared folder. The database and logs should NOT "
+                "be synced. Only raw/ should be synced."
+            )
+            warnings.append(msg)
+            log.warning(f"SECURITY: {msg}")
+
+        # 5. Best-effort LUKS/fscrypt check on the partition
+        try:
+            self._check_disk_encryption(lifedata_dir, warnings)
+        except Exception:
+            pass  # best-effort — never fail on this
+
+        if not warnings:
+            log.info("Startup security checks passed")
+
+        return warnings
+
+    @staticmethod
+    def _check_disk_encryption(path: str, warnings: list[str]) -> None:
+        """Best-effort check for LUKS or fscrypt on the partition holding path."""
+        try:
+            # Find the mount point device for the path
+            result = subprocess.run(
+                ["df", "--output=source", path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return
+            lines = result.stdout.strip().splitlines()
+            if len(lines) < 2:
+                return
+            device = lines[1].strip()
+
+            # Check if the device is a LUKS-mapped dm-crypt volume
+            # dm-crypt devices show up as /dev/dm-* or /dev/mapper/*
+            if "/dev/mapper/" in device or "/dev/dm-" in device:
+                log.info(f"Disk encryption: {device} appears to be a dm-crypt/LUKS volume")
+                return
+
+            # Check fscrypt policy on the directory
+            result = subprocess.run(
+                ["fscryptctl", "get_policy", path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                log.info(f"Disk encryption: fscrypt policy active on {path}")
+                return
+
+            # Neither detected
+            msg = (
+                f"No disk encryption detected on {device}. "
+                "LUKS full-disk encryption is strongly recommended."
+            )
+            warnings.append(msg)
+            log.warning(f"SECURITY: {msg}")
+        except FileNotFoundError:
+            # df or fscryptctl not available — skip silently
+            pass
 
     @staticmethod
     def _is_safe_path(path: str, raw_base: str) -> bool:

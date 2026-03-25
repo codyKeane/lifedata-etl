@@ -1,5 +1,55 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-25 — Threat Model, Log Sanitization, and Startup Security Checks
+
+**Task:** Document security posture in a threat model. Implement log sanitization and startup permission checks.
+
+**Changes made:**
+
+### 1. docs/THREAT_MODEL.md (new)
+Comprehensive threat model covering:
+- **Assets**: location history, behavioral patterns, communication metadata, health data, voice recordings, API keys, the aggregate behavioral model
+- **Trust boundaries**: phone, network, desktop, external APIs, reports
+- **Threat actors**: opportunistic local access, desktop/phone malware, Syncthing compromise, stolen device, cloud backup leak
+- **10 attack vectors with mitigations**: Syncthing relay exposure, .env theft, database theft, CSV injection, path traversal, log injection, API key leakage, contact exposure, GPS precision in logs, transcript exposure
+- Each vector documents: the attack, current mitigations, residual risk, and TODOs
+- Includes operational security checklist
+
+### 2. core/sanitizer.py (new)
+- `sanitize_for_log(text) -> str` — applies all redaction passes:
+  - `truncate_coordinates()` — GPS coords with 3+ decimal digits truncated to 2 (32.776700 → 32.77***)
+  - `redact_phones()` — +prefixed and (NNN) NNN-NNNN patterns → [REDACTED_PHONE]
+  - `redact_emails()` — standard email patterns → [REDACTED_EMAIL]
+  - `redact_api_keys()` — 32+ char hex/alphanumeric tokens → [REDACTED_KEY]
+- Phone regex specifically avoids matching 10-digit epoch timestamps (no `+` prefix = no match)
+
+### 3. parser_utils.py sanitizer integration
+- Raw CSV line logged on parse errors now passes through `sanitize_for_log()` before reaching the log
+- This was the one HIGH-severity finding from the log audit: raw CSV data (up to 200 chars) could contain GPS, phone numbers, etc.
+
+### 4. Orchestrator startup security checks (`core/orchestrator.py`)
+New `_check_startup_security()` method called from `__init__`, checks:
+1. `.env` permissions are 0600
+2. `config.yaml` permissions are 0600 or 0644
+3. `~/LifeData/` directory permissions are 0700
+4. `~/LifeData/` does NOT contain `.stfolder/` (Syncthing shared folder marker)
+5. LUKS/fscrypt active on partition (best-effort via `df` + device path analysis + `fscryptctl`)
+
+All checks are advisory — they log warnings but never block the ETL.
+
+### Tests: tests/test_security.py (22 tests)
+
+| Class | Tests | Coverage |
+|---|---|---|
+| `TestSanitizeForLog` | 12 | GPS truncation (high/4-decimal/preserved low), phone (+prefix, parens, epoch preserved), API key, email, realistic geofence, mixed, empty, safe string |
+| `TestIndividualSanitizers` | 4 | Each redaction function standalone |
+| `TestParserUtilsSanitization` | 2 | GPS coords sanitized in parse error log, phone numbers sanitized |
+| `TestStartupSecurityChecks` | 4 | .env permission warning, .stfolder warning, clean environment passes, directory permission warning |
+
+**Test results:** 603/603 passed in 1.93s (22 new + 581 existing).
+
+---
+
 ## 2026-03-24 — Event Provenance Tracing and --trace CLI
 
 **Task:** Add lightweight provenance tracing to Event model, parsers, and DB logging. Implement `--trace <raw_source_id>` CLI for debugging "why does this data point exist?"

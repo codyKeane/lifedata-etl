@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from core.event import Event
 from core.logger import get_logger
+from core.sanitizer import sanitize_for_log
 
 log = get_logger("lifedata.parser_utils")
 
@@ -89,7 +90,7 @@ def safe_parse_rows(
                         result.events.append(parsed)
                 except Exception as e:
                     result.skipped += 1
-                    truncated = line[:MAX_LINE_LOG_LEN]
+                    truncated = sanitize_for_log(line[:MAX_LINE_LOG_LEN])
                     log.warning(
                         f"[{module_id}] {filepath}:{line_num}: "
                         f"parse error: {e} — raw: {truncated!r}"
