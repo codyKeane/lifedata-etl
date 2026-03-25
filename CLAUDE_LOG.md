@@ -1,5 +1,39 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-25 — Performance Baselines for Parsing, Ingestion, and Queries
+
+**Task:** Create benchmark tests with @pytest.mark.slow, establish performance baselines, generate PERFORMANCE_BASELINE.md.
+
+**Changes made:**
+
+### tests/test_performance.py (5 benchmarks)
+All marked `@pytest.mark.slow` — excluded from `make test`, run via `make test-perf`.
+
+| Test | Dataset | Limit | Actual | Throughput |
+|---|---|---|---|---|
+| `test_parse_large_csv` | 100K-row screen CSV | <10s | 0.77s | 130,347 rows/sec |
+| `test_insert_10k_events` | 10K Event objects | <5s | 0.24s | 42,151 events/sec |
+| `test_daily_summary_query_at_scale` | 500K events / 180 days | <2s | 0.062s | 5 module groups |
+| `test_correlation_query_at_scale` | 500K events, 30-day window | <3s | 0.024s | 47 aligned days |
+| `test_fts_search_at_scale` | 50K events with text | <1s | 0.0002s | 100 matches |
+
+Session-scoped `write_baseline_report` fixture writes results + hardware info to `docs/PERFORMANCE_BASELINE.md`.
+
+### Makefile
+- Added `test-perf` target: `pytest tests/ -v -m slow --timeout=600`
+- Added to `.PHONY`
+
+### pyproject.toml
+- Registered `slow` marker
+- Added `addopts = "-m 'not slow'"` to exclude benchmarks from default test run
+
+### docs/PERFORMANCE_BASELINE.md (auto-generated)
+Hardware: i7-12700H, 33G RAM, NVMe SSD. Dated record for regression comparison.
+
+**Test results:** Default suite 605/605 passed (5 deselected). Perf suite 5/5 passed in 40.29s.
+
+---
+
 ## 2026-03-25 — Type Hints Audit (no changes needed)
 
 **Task:** Analyze the type-hints directives against the current codebase.

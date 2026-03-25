@@ -1,4 +1,4 @@
-.PHONY: install install-dev test test-cov lint format typecheck etl etl-dry status clean
+.PHONY: install install-dev test test-perf test-cov lint format typecheck etl etl-dry status clean
 
 VENV := venv
 PYTHON := $(VENV)/bin/python
@@ -21,6 +21,9 @@ install-dev:
 
 test:
 	$(PYTEST) tests/ -v --timeout=30
+
+test-perf:
+	$(PYTEST) tests/ -v -m slow --timeout=600
 
 test-cov:
 	$(PYTEST) tests/ -v --cov=core --cov=modules --cov-report=term-missing
