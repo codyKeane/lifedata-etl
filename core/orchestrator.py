@@ -10,16 +10,13 @@ with SAVEPOINT isolation.
 import importlib
 import json
 import os
-import re
 import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
-from dotenv import load_dotenv
-
-from core.config_schema import ConfigValidationError, validate_config
+from core.config import load_config
+from core.config_schema import ConfigValidationError, RootConfig
 from core.database import Database
 from core.logger import get_logger, setup_logging
 from core.module_interface import ModuleInterface
@@ -32,80 +29,24 @@ ALLOWED_EXTENSIONS = {".csv", ".json"}
 # Skip files modified within this many seconds (Syncthing mid-sync protection)
 FILE_STABILITY_SECONDS = 60
 
-# Regex to resolve ${ENV_VAR} placeholders in config values
-_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
-
 
 class Orchestrator:
     """Main ETL execution engine."""
 
     def __init__(self, config_path: str = "~/LifeData/config.yaml"):
-        # Load .env first — must be 600, never in Syncthing folder
-        env_path = os.path.expanduser("~/LifeData/.env")
-        if os.path.exists(env_path):
-            load_dotenv(env_path, override=False)
-        else:
-            log.warning(
-                ".env file not found at ~/LifeData/.env — API keys may be missing"
-            )
-
-        self.config = self._load_config(config_path)
-
-        # Validate config — fail fast with clear errors
+        # Load, resolve env vars, and validate config in one step
         try:
-            validate_config(self.config)
+            self.config: RootConfig = load_config(config_path)
             log.info("Config validation passed")
         except ConfigValidationError as e:
             log.error(str(e))
             raise
 
         # Set up structured logging now that we have the config
-        log_path = self.config["lifedata"].get("log_path", "~/LifeData/logs/etl.log")
-        setup_logging(log_path)
+        setup_logging(self.config.lifedata.log_path)
 
-        self.db = Database(self.config["lifedata"]["db_path"])
+        self.db = Database(self.config.lifedata.db_path)
         self.modules: list[ModuleInterface] = []
-
-    @staticmethod
-    def _load_config(path: str) -> dict:
-        """Load and resolve config.yaml, substituting ${ENV_VAR} references."""
-        expanded = os.path.expanduser(path)
-        with open(expanded, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-
-        Orchestrator._resolve_env_vars(config)
-        return config
-
-    @staticmethod
-    def _resolve_env_var_match(m):
-        """Resolve a single ${ENV_VAR} match, logging a warning if unset."""
-        var_name = m.group(1)
-        value = os.environ.get(var_name)
-        if value is None:
-            log.warning(
-                f"Environment variable '{var_name}' is not set — "
-                f"replaced with empty string in config"
-            )
-            return ""
-        return value
-
-    @staticmethod
-    def _resolve_env_vars(obj):
-        """Recursively resolve ${ENV_VAR} patterns in config values."""
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                if isinstance(value, str) and "${" in value:
-                    obj[key] = _ENV_VAR_RE.sub(
-                        Orchestrator._resolve_env_var_match, value
-                    )
-                elif isinstance(value, (dict, list)):
-                    Orchestrator._resolve_env_vars(value)
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                if isinstance(item, str) and "${" in item:
-                    obj[i] = _ENV_VAR_RE.sub(Orchestrator._resolve_env_var_match, item)
-                elif isinstance(item, (dict, list)):
-                    Orchestrator._resolve_env_vars(item)
 
     @staticmethod
     def _is_safe_path(path: str, raw_base: str) -> bool:
@@ -138,9 +79,7 @@ class Orchestrator:
             single_module: If set, only load this one module (for --module flag).
         """
         self.modules = []
-        allowlist = (
-            self.config["lifedata"].get("security", {}).get("module_allowlist", [])
-        )
+        allowlist = self.config.lifedata.security.module_allowlist
         modules_dir = Path(__file__).parent.parent / "modules"
 
         if not modules_dir.exists():
@@ -172,7 +111,8 @@ class Orchestrator:
                 continue
 
             # Check if module is enabled
-            module_config = self.config["lifedata"]["modules"].get(module_name, {})
+            mod_cfg_obj = getattr(self.config.lifedata.modules, module_name, None)
+            module_config = mod_cfg_obj.model_dump() if mod_cfg_obj else {}
             if not module_config.get("enabled", True):
                 log.info(f"Module '{module_name}' is disabled, skipping")
                 continue
@@ -180,17 +120,10 @@ class Orchestrator:
             # Inject top-level paths into meta module config so it can
             # run storage/sync checks without the full config tree
             if module_name == "meta":
-                module_config = dict(module_config)  # shallow copy
-                module_config["_raw_base"] = self.config["lifedata"].get(
-                    "raw_base", "~/LifeData/raw/LifeData"
-                )
-                module_config["_db_path"] = self.config["lifedata"].get(
-                    "db_path", "~/LifeData/db/lifedata.db"
-                )
-                # Pass the resolved Syncthing API key
-                security = self.config["lifedata"].get("security", {})
-                module_config["syncthing_api_key"] = security.get(
-                    "syncthing_api_key", ""
+                module_config["_raw_base"] = self.config.lifedata.raw_base
+                module_config["_db_path"] = self.config.lifedata.db_path
+                module_config["syncthing_api_key"] = (
+                    self.config.lifedata.security.syncthing_api_key
                 )
 
             try:
@@ -232,9 +165,8 @@ class Orchestrator:
         self.db.ensure_schema()
 
         # Backup DB before any writes
-        retention = self.config["lifedata"].get("retention", {})
         if not dry_run:
-            self.db.backup(keep_days=retention.get("db_backup_keep_days", 7))
+            self.db.backup(keep_days=self.config.lifedata.retention.db_backup_keep_days)
 
         # Reset affected dates tracker
         self.db.reset_affected_dates()
@@ -251,7 +183,7 @@ class Orchestrator:
         total_skipped = 0
         failed_modules: list[str] = []
         module_metrics: dict[str, dict] = {}
-        raw_base = os.path.expanduser(self.config["lifedata"]["raw_base"])
+        raw_base = os.path.expanduser(self.config.lifedata.raw_base)
 
         for module in self.modules:
             log.info(f"[{module.module_id}] Starting module run")
@@ -394,7 +326,7 @@ class Orchestrator:
             try:
                 from analysis.reports import generate_daily_report
 
-                generate_daily_report(self.db, self.modules, self.config)
+                generate_daily_report(self.db, self.modules, self.config.model_dump())
                 log.info("Daily report generated")
             except ImportError:
                 log.info(
@@ -425,7 +357,7 @@ class Orchestrator:
     ) -> None:
         """Append a JSON-lines entry to logs/metrics.jsonl."""
         duration = round(time.time() - run_start, 2)
-        db_path = os.path.expanduser(self.config["lifedata"]["db_path"])
+        db_path = os.path.expanduser(self.config.lifedata.db_path)
 
         try:
             db_size_bytes = os.path.getsize(db_path)

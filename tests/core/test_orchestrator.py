@@ -5,6 +5,7 @@ Tests for core/orchestrator.py — path safety, env var resolution, module allow
 import os
 import pytest
 
+from core.config import _resolve_env_vars
 from core.orchestrator import Orchestrator
 
 
@@ -78,40 +79,40 @@ class TestResolveEnvVars:
     def test_simple_substitution(self, monkeypatch):
         monkeypatch.setenv("TEST_API_KEY", "secret123")
         config = {"api_key": "${TEST_API_KEY}"}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["api_key"] == "secret123"
 
     def test_nested_dict(self, monkeypatch):
         monkeypatch.setenv("INNER_VAR", "resolved")
         config = {"outer": {"inner": "${INNER_VAR}"}}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["outer"]["inner"] == "resolved"
 
     def test_list_values(self, monkeypatch):
         monkeypatch.setenv("LIST_VAR", "item")
         config = {"items": ["${LIST_VAR}", "static"]}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["items"] == ["item", "static"]
 
     def test_unset_var_becomes_empty(self, monkeypatch):
         monkeypatch.delenv("NONEXISTENT_VAR", raising=False)
         config = {"key": "${NONEXISTENT_VAR}"}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["key"] == ""
 
     def test_no_substitution_without_marker(self):
         config = {"key": "plain_value"}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["key"] == "plain_value"
 
     def test_multiple_vars_in_one_string(self, monkeypatch):
         monkeypatch.setenv("A", "hello")
         monkeypatch.setenv("B", "world")
         config = {"msg": "${A} ${B}"}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config["msg"] == "hello world"
 
     def test_non_string_values_untouched(self):
         config = {"count": 42, "flag": True, "ratio": 3.14}
-        Orchestrator._resolve_env_vars(config)
+        _resolve_env_vars(config)
         assert config == {"count": 42, "flag": True, "ratio": 3.14}

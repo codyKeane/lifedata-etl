@@ -1,5 +1,29 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Typed Config Validation with Pydantic
+
+**Task:** Create `core/config.py` with `load_config()`, add syncthing relay hard error, update orchestrator to use typed config, add config tests.
+
+### Changes Made
+
+1. **`core/config.py`** (new) — Unified config loader with `load_config(path, env_path) -> RootConfig`. Consolidates .env loading, YAML parsing, `${ENV_VAR}` resolution, and pydantic validation into a single entry point. Moved `_resolve_env_vars()` from orchestrator to this module.
+
+2. **`core/config_schema.py`** — Added Step 4: syncthing_relay_enabled=True raises hard error ("must never route through third-party relay servers"). Changed Step 3 (API key checks) from hard errors to warnings per directive ("warn, don't fail, since not all modules need all keys").
+
+3. **`core/orchestrator.py`** — Replaced `yaml.safe_load` + manual validation with `load_config()`. Removed `_load_config()`, `_resolve_env_vars()`, `_resolve_env_var_match()` static methods and `_ENV_VAR_RE`. All config access now uses typed attributes (`self.config.lifedata.db_path`) instead of dict access (`self.config["lifedata"]["db_path"]`). Module configs converted to dicts via `.model_dump()` for backward compat with `create_module()` factories.
+
+4. **`tests/core/test_config.py`** (new) — 8 tests covering: valid config loads, typed access works, missing required field raises, invalid timezone raises, syncthing relay=True raises, unresolved env var warns but doesn't crash, invalid path raises, nonexistent module in allowlist raises.
+
+5. **`tests/core/test_orchestrator.py`** — Updated env var resolution tests to import from `core.config` instead of `Orchestrator`.
+
+### Verification
+
+- ✅ 262/262 tests pass (including 8 new config tests)
+- ✅ ETL dry-run works end-to-end with typed config (`python run_etl.py --dry-run --module device` — 204 events parsed)
+- ✅ API key warnings now non-blocking (was hard error, now logs warning)
+
+---
+
 ## 2026-03-24 — Dependency Pinning, Makefile & Tool Config
 
 **Task:** Audit all Python imports, update requirements files, add Makefile targets, create pyproject.toml.

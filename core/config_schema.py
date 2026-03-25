@@ -419,7 +419,10 @@ def validate_config(config: dict) -> RootConfig:
             errors.append(f"{name}: directory is not writable — {check_dir}")
 
     # ── Step 3: API key env vars resolve to non-empty values ────
-    # Only check keys for enabled modules
+    # Warn (don't fail) if missing — not all modules need all keys
+    import logging
+
+    _log = logging.getLogger("lifedata.config")
     api_key_checks: list[tuple[str, str, bool]] = [
         ("environment.weather_api_key", ld.modules.environment.weather_api_key, ld.modules.environment.enabled),
         ("environment.airnow_api_key", ld.modules.environment.airnow_api_key, ld.modules.environment.enabled),
@@ -429,12 +432,20 @@ def validate_config(config: dict) -> RootConfig:
     ]
     for field_name, value, enabled in api_key_checks:
         if enabled and (not value or value.startswith("${")):
-            errors.append(
-                f"{field_name}: API key is empty or unresolved "
-                f"(got '{value or ''}') — check .env file"
+            _log.warning(
+                "%s: API key is empty or unresolved (got '%s') — check .env file",
+                field_name,
+                value or "",
             )
 
-    # ── Step 4: Module allowlist vs actual module directories ───
+    # ── Step 4: Syncthing relay must be disabled ────────────────
+    if ld.security.syncthing_relay_enabled:
+        errors.append(
+            "security.syncthing_relay_enabled: must be false — "
+            "LifeData must never route through third-party relay servers"
+        )
+
+    # ── Step 5: Module allowlist vs actual module directories ───
     modules_dir = Path(__file__).parent.parent / "modules"
     if modules_dir.exists():
         actual_modules = {
@@ -449,7 +460,7 @@ def validate_config(config: dict) -> RootConfig:
                     f"modules/{name}/module.py directory"
                 )
 
-    # ── Step 5: Timezone is valid ───────────────────────────────
+    # ── Step 6: Timezone is valid ───────────────────────────────
     import zoneinfo
 
     try:
