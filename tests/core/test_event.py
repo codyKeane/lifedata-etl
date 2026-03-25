@@ -143,6 +143,12 @@ class TestEventDeduplication:
         e2 = valid_event_factory(value_numeric=86.0)
         assert e1.event_id != e2.event_id
 
+    def test_different_value_text_different_id(self, valid_event_factory):
+        e1 = valid_event_factory(value_text="alpha")
+        e2 = valid_event_factory(value_text="beta")
+        assert e1.raw_source_id != e2.raw_source_id
+        assert e1.event_id != e2.event_id
+
     def test_float_precision_stability(self, valid_event_factory):
         """Floats normalized to .6f — close but distinct values differ."""
         e1 = valid_event_factory(value_numeric=85.0000001)

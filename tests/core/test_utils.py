@@ -71,6 +71,30 @@ class TestParseTimestamp:
         # Fallback to -5, so 10:00 local → 15:00 UTC
         assert "15:00:00" in utc
 
+    def test_parse_timestamp_dst_spring_forward(self):
+        """March DST transition: clocks spring forward, offset changes -0600 → -0500."""
+        # 2026-03-08 is DST spring-forward in US Central
+        # At 2:00 AM CST, clocks move to 3:00 AM CDT
+        # Before DST: 01:00 CST (-0600) = 07:00 UTC
+        utc_before, _ = parse_timestamp("2026-03-08 01:00:00", "-0600")
+        assert "07:00:00" in utc_before
+
+        # After DST: 03:00 CDT (-0500) = 08:00 UTC
+        utc_after, _ = parse_timestamp("2026-03-08 03:00:00", "-0500")
+        assert "08:00:00" in utc_after
+
+    def test_parse_timestamp_dst_fall_back(self):
+        """November DST transition: clocks fall back, offset changes -0500 → -0600."""
+        # 2026-11-01 is DST fall-back in US Central
+        # At 2:00 AM CDT, clocks move to 1:00 AM CST
+        # Before fallback: 01:00 CDT (-0500) = 06:00 UTC
+        utc_before, _ = parse_timestamp("2026-11-01 01:00:00", "-0500")
+        assert "06:00:00" in utc_before
+
+        # After fallback: 01:00 CST (-0600) = 07:00 UTC (same wall clock, different UTC)
+        utc_after, _ = parse_timestamp("2026-11-01 01:00:00", "-0600")
+        assert "07:00:00" in utc_after
+
 
 # ──────────────────────────────────────────────────────────────
 # format_offset

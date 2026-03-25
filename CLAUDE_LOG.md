@@ -1,5 +1,23 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Gap Analysis & Missing Unit Tests for Core Engine
+
+**Task:** Compare requested unit test directives against existing test suite; add missing tests.
+
+**Analysis:** Mapped all requested tests to existing code. Found 9 missing tests across 3 files:
+- `test_event.py`: Missing `test_different_value_text_different_id` (value_text field change in dedup hash)
+- `test_database.py`: Missing `test_insert_and_retrieve_event` (full round-trip), `test_replace_preserves_event_id`, `test_fts_search`, `test_concurrent_insert_no_deadlock`, `test_backup_creates_file`, `test_backup_prunes_old`
+- `test_utils.py`: Missing `test_parse_timestamp_dst_spring_forward`, `test_parse_timestamp_dst_fall_back`
+
+**Changes made:**
+- Added 1 test to `tests/core/test_event.py` (TestEventDeduplication class)
+- Added 6 tests to `tests/core/test_database.py` (new TestFTSSearch, TestConcurrentInsertSafety, TestBackup classes + 2 tests in TestInsertEvents)
+- Added 2 tests to `tests/core/test_utils.py` (DST transition tests in TestParseTimestamp class)
+
+**Result:** All 124 tests pass in 0.15s. All tests are fast (<1s) and isolated (no shared state).
+
+---
+
 ## 2026-03-24 — Comprehensive Test Fixtures (conftest.py)
 
 **Task:** Extend `tests/conftest.py` with comprehensive fixtures for the full test suite.

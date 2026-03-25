@@ -2,7 +2,9 @@
 Tests for core/database.py — SAVEPOINT rollback, deduplication, schema, migrations.
 """
 
+import os
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -156,6 +158,34 @@ class TestInsertEvents:
         db.insert_events_for_module("device", [e])
         db.reset_affected_dates()
         assert len(db.get_affected_dates()) == 0
+
+    def test_insert_and_retrieve_event(self, db, valid_event):
+        """Round-trip: insert an event and query it back with all fields intact."""
+        db.insert_events_for_module("device", [valid_event])
+        rows = db.query_events(source_module="device.battery")
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["event_id"] == valid_event.event_id
+        assert row["timestamp_utc"] == valid_event.timestamp_utc
+        assert row["source_module"] == valid_event.source_module
+        assert row["event_type"] == valid_event.event_type
+        assert row["value_numeric"] == valid_event.value_numeric
+        assert row["raw_source_id"] == valid_event.raw_source_id
+        assert row["confidence"] == valid_event.confidence
+
+    def test_replace_preserves_event_id(self, db, valid_event_factory):
+        """Re-inserting an event with same raw_source_id keeps the same event_id PK."""
+        e1 = valid_event_factory(confidence=0.5)
+        e2 = valid_event_factory(confidence=0.9)
+        # Same defaults → same raw_source_id → same event_id
+        assert e1.event_id == e2.event_id
+
+        db.insert_events_for_module("device", [e1])
+        db.insert_events_for_module("device", [e2])
+
+        rows = db.query_events(source_module="device.battery")
+        assert len(rows) == 1
+        assert rows[0]["event_id"] == e1.event_id
 
 
 # ──────────────────────────────────────────────────────────────
@@ -424,6 +454,126 @@ class TestModuleStatus:
         ).fetchone()
         assert row[0] == "1.1.0"
         assert row[1] == "failed"
+
+
+# ──────────────────────────────────────────────────────────────
+# Context manager
+# ──────────────────────────────────────────────────────────────
+
+
+class TestFTSSearch:
+    """Full-text search on the events_fts virtual table."""
+
+    def test_fts_search(self, db, valid_event_factory):
+        """Insert event with value_text, verify FTS query returns it."""
+        e = valid_event_factory(
+            value_text="unusual synchronicity at the grocery store",
+            source_module="mind.synchronicity",
+            event_type="observation",
+        )
+        db.insert_events_for_module("mind", [e])
+
+        rows = db.conn.execute(
+            "SELECT event_id FROM events_fts WHERE events_fts MATCH 'synchronicity'"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == e.event_id
+
+
+# ──────────────────────────────────────────────────────────────
+# Concurrent insert safety (WAL mode)
+# ──────────────────────────────────────────────────────────────
+
+
+class TestConcurrentInsertSafety:
+    """WAL mode should allow concurrent writes from different threads."""
+
+    def test_concurrent_insert_no_deadlock(self, tmp_path, valid_event_factory):
+        import threading
+
+        db_path = str(tmp_path / "concurrent.db")
+        errors = []
+
+        def insert_module(module_name, source, n_events):
+            try:
+                database = Database(db_path)
+                database.ensure_schema()
+                events = [
+                    valid_event_factory(
+                        source_module=source,
+                        timestamp_utc=f"2026-03-24T{h:02d}:00:00+00:00",
+                    )
+                    for h in range(n_events)
+                ]
+                database.insert_events_for_module(module_name, events)
+                database.close()
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(
+            target=insert_module, args=("device", "device.battery", 5)
+        )
+        t2 = threading.Thread(
+            target=insert_module, args=("environment", "environment.weather", 5)
+        )
+        t1.start()
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        assert not errors, f"Concurrent inserts failed: {errors}"
+
+        # Verify both modules' data landed
+        check_db = Database(db_path)
+        check_db.ensure_schema()
+        assert check_db.count_events(source_module="device.battery") == 5
+        assert check_db.count_events(source_module="environment.weather") == 5
+        check_db.close()
+
+
+# ──────────────────────────────────────────────────────────────
+# Backup
+# ──────────────────────────────────────────────────────────────
+
+
+class TestBackup:
+    """Database backup creation and pruning."""
+
+    def test_backup_creates_file(self, tmp_path, valid_event_factory):
+        db_path = str(tmp_path / "db" / "lifedata.db")
+        database = Database(db_path)
+        database.ensure_schema()
+        database.insert_events_for_module("device", [valid_event_factory()])
+
+        backup_path = database.backup()
+        assert backup_path is not None
+        assert os.path.exists(backup_path)
+        assert os.path.getsize(backup_path) > 0
+        database.close()
+
+    def test_backup_prunes_old(self, tmp_path, valid_event_factory):
+        db_path = str(tmp_path / "db" / "lifedata.db")
+        database = Database(db_path)
+        database.ensure_schema()
+        database.insert_events_for_module("device", [valid_event_factory()])
+
+        # Create fake old backups
+        backup_dir = os.path.join(tmp_path / "db", "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        for i in range(5):
+            old_backup = os.path.join(backup_dir, f"lifedata.db.bak.old-{i}")
+            with open(old_backup, "w") as f:
+                f.write("fake backup")
+            # Set mtime to 30 days ago
+            old_time = datetime.now(timezone.utc).timestamp() - (30 * 86400)
+            os.utime(old_backup, (old_time, old_time))
+
+        database.backup(keep_days=7)
+
+        remaining = os.listdir(backup_dir)
+        # Only today's backup should survive; the 5 old ones should be pruned
+        assert len(remaining) == 1
+        database.close()
 
 
 # ──────────────────────────────────────────────────────────────
