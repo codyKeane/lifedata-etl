@@ -1,5 +1,6 @@
 """
-Tests for modules/environment/parsers.py — hourly, geofence, astro parsers.
+Tests for modules/environment/parsers.py — hourly, geofence, astro,
+barometer/light/magnetometer summary parsers.
 """
 
 import json
@@ -9,6 +10,9 @@ from modules.environment.parsers import (
     parse_hourly,
     parse_geofence,
     parse_astro,
+    parse_barometer_summary,
+    parse_light_summary,
+    parse_magnetometer_summary,
 )
 from tests.conftest import HOURLY_LINES, GEOFENCE_LINES, ASTRO_LINES
 
@@ -164,3 +168,160 @@ class TestParseAstro:
         ids1 = [e.event_id for e in parse_astro(path)]
         ids2 = [e.event_id for e in parse_astro(path)]
         assert ids1 == ids2
+
+
+# ──────────────────────────────────────────────────────────────
+# Barometer summary parser
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParseBarometerSummary:
+    def test_happy_path(self, tmp_path):
+        csv = tmp_path / "barometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_pressure_hpa,min_pressure_hpa,"
+            "max_pressure_hpa,mean_altitude_m,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,1013.25,1012.80,1013.70,150.5,60\n"
+        )
+        events = parse_barometer_summary(str(csv))
+        assert len(events) == 1
+        assert events[0].source_module == "environment.pressure"
+        assert events[0].event_type == "local_barometer"
+        assert events[0].value_numeric == 1013.25
+
+    def test_timezone_offset_from_row(self, tmp_path):
+        csv = tmp_path / "barometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_pressure_hpa,min_pressure_hpa,"
+            "max_pressure_hpa,mean_altitude_m,sample_count\n"
+            "1711303200,3-24-26,10:00,-0700,1013.25,1012.80,1013.70,150.5,60\n"
+        )
+        events = parse_barometer_summary(str(csv))
+        assert events[0].timezone_offset == "-0700"
+
+    def test_missing_pressure_skipped(self, tmp_path):
+        csv = tmp_path / "barometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_pressure_hpa,min_pressure_hpa,"
+            "max_pressure_hpa,mean_altitude_m,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,,,,150.5,60\n"
+        )
+        events = parse_barometer_summary(str(csv))
+        assert len(events) == 0
+
+    def test_empty_file(self, tmp_path):
+        csv = tmp_path / "barometer_summary.csv"
+        csv.write_text("")
+        assert parse_barometer_summary(str(csv)) == []
+
+    def test_events_valid(self, tmp_path):
+        csv = tmp_path / "barometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_pressure_hpa,min_pressure_hpa,"
+            "max_pressure_hpa,mean_altitude_m,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,1013.25,1012.80,1013.70,150.5,60\n"
+        )
+        for e in parse_barometer_summary(str(csv)):
+            assert e.is_valid
+
+
+# ──────────────────────────────────────────────────────────────
+# Light summary parser
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParseLightSummary:
+    def test_happy_path(self, tmp_path):
+        csv = tmp_path / "light_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_lux,min_lux,max_lux,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,350.5,200.0,500.0,60\n"
+        )
+        events = parse_light_summary(str(csv))
+        assert len(events) == 1
+        assert events[0].source_module == "environment.light"
+        assert events[0].event_type == "lux_reading"
+        assert events[0].value_numeric == 350.5
+
+    def test_timezone_offset_from_row(self, tmp_path):
+        csv = tmp_path / "light_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_lux,min_lux,max_lux,sample_count\n"
+            "1711303200,3-24-26,10:00,+0530,350.5,200.0,500.0,60\n"
+        )
+        events = parse_light_summary(str(csv))
+        assert events[0].timezone_offset == "+0530"
+
+    def test_missing_lux_skipped(self, tmp_path):
+        csv = tmp_path / "light_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_lux,min_lux,max_lux,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,,,500.0,60\n"
+        )
+        events = parse_light_summary(str(csv))
+        assert len(events) == 0
+
+    def test_empty_file(self, tmp_path):
+        csv = tmp_path / "light_summary.csv"
+        csv.write_text("")
+        assert parse_light_summary(str(csv)) == []
+
+    def test_events_valid(self, tmp_path):
+        csv = tmp_path / "light_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_lux,min_lux,max_lux,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,350.5,200.0,500.0,60\n"
+        )
+        for e in parse_light_summary(str(csv)):
+            assert e.is_valid
+
+
+# ──────────────────────────────────────────────────────────────
+# Magnetometer summary parser
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParseMagnetometerSummary:
+    def test_happy_path(self, tmp_path):
+        csv = tmp_path / "magnetometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_mag_ut,std_mag_ut,max_mag_ut,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,48.5,2.1,55.0,60\n"
+        )
+        events = parse_magnetometer_summary(str(csv))
+        assert len(events) == 1
+        assert events[0].source_module == "environment.emf"
+        assert events[0].event_type == "magnetometer"
+        assert events[0].value_numeric == 48.5
+
+    def test_timezone_offset_from_row(self, tmp_path):
+        csv = tmp_path / "magnetometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_mag_ut,std_mag_ut,max_mag_ut,sample_count\n"
+            "1711303200,3-24-26,10:00,-0600,48.5,2.1,55.0,60\n"
+        )
+        events = parse_magnetometer_summary(str(csv))
+        assert events[0].timezone_offset == "-0600"
+
+    def test_missing_mag_skipped(self, tmp_path):
+        csv = tmp_path / "magnetometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_mag_ut,std_mag_ut,max_mag_ut,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,,2.1,55.0,60\n"
+        )
+        events = parse_magnetometer_summary(str(csv))
+        assert len(events) == 0
+
+    def test_empty_file(self, tmp_path):
+        csv = tmp_path / "magnetometer_summary.csv"
+        csv.write_text("")
+        assert parse_magnetometer_summary(str(csv)) == []
+
+    def test_events_valid(self, tmp_path):
+        csv = tmp_path / "magnetometer_summary.csv"
+        csv.write_text(
+            "epoch,date,time,timezone_offset,mean_mag_ut,std_mag_ut,max_mag_ut,sample_count\n"
+            "1711303200,3-24-26,10:00,-0500,48.5,2.1,55.0,60\n"
+        )
+        for e in parse_magnetometer_summary(str(csv)):
+            assert e.is_valid

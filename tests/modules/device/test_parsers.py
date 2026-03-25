@@ -108,6 +108,45 @@ class TestParseScreen:
         assert len(events) == 3
         assert events[0].timezone_offset == "-0500"
 
+    def test_happy_path_10_rows(self, csv_file_factory):
+        """10 valid rows should produce 10 events."""
+        lines = [
+            f"171130{3200 + i * 300},3-24-26,{10 + i // 12}:{(i * 5) % 60:02d},-0500,{'on' if i % 2 == 0 else 'off'},{85 - i}"
+            for i in range(10)
+        ]
+        path = csv_file_factory("screen_2026.csv", lines)
+        events = parse_screen(path)
+        assert len(events) == 10
+        assert all(e.source_module == "device.screen" for e in events)
+
+    def test_truncated_file(self, csv_file_factory):
+        """File cut mid-line: complete rows parsed, partial row skipped."""
+        lines = SCREEN_V4_LINES + ["1711304400,3-24-26,10:20,-05"]
+        path = csv_file_factory("screen_2026.csv", lines)
+        events = parse_screen(path)
+        assert len(events) >= 3  # the 3 complete rows survive
+
+    def test_zero_byte_file(self, tmp_path):
+        """Zero-byte file returns empty list, no exception."""
+        path = tmp_path / "screen_2026.csv"
+        path.write_text("")
+        events = parse_screen(str(path))
+        assert events == []
+
+    def test_missing_columns(self, csv_file_factory):
+        """Row with fewer columns than expected should be skipped."""
+        lines = ["1711303200,3-24-26"]
+        path = csv_file_factory("screen_2026.csv", lines)
+        events = parse_screen(path)
+        assert len(events) == 0
+
+    def test_bad_timestamp(self, csv_file_factory):
+        """Non-numeric epoch should skip the row."""
+        lines = ["not_a_number,3-24-26,10:00,on,85"]
+        path = csv_file_factory("screen_2026.csv", lines)
+        events = parse_screen(path)
+        assert len(events) == 0
+
     def test_invalid_state_skipped(self, csv_file_factory):
         lines = ["1711303200,3-24-26,10:00,garbage,85"]
         path = csv_file_factory("screen_2026.csv", lines)

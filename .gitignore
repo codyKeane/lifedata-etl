@@ -27,7 +27,7 @@ db/backups/
 raw/
 
 # Binary media files
-media/
+/media/
 
 # Generated reports (contain personal data summaries)
 reports/
