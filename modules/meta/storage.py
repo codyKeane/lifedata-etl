@@ -6,9 +6,12 @@ Monitors disk usage across all LifeData directories and enforces
 retention policies for raw files and logs.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import time
+from typing import Any
 
 from core.logger import get_logger
 
@@ -42,7 +45,7 @@ def get_dir_size(path: str) -> int:
     return total
 
 
-def storage_report(config: dict) -> dict:
+def storage_report(config: dict[str, Any]) -> dict[str, Any]:
     """Report on disk usage across all LifeData directories.
 
     Args:
@@ -60,7 +63,7 @@ def storage_report(config: dict) -> dict:
         "logs": "~/LifeData/logs",
     }
 
-    report: dict = {}
+    report: dict[str, Any] = {}
     for name, path in paths.items():
         expanded = os.path.expanduser(path)
         if os.path.exists(expanded):
@@ -86,7 +89,7 @@ def storage_report(config: dict) -> dict:
     return report
 
 
-def enforce_retention_policy(config: dict) -> dict:
+def enforce_retention_policy(config: dict[str, Any]) -> dict[str, Any]:
     """Enforce retention policies from config.yaml.
 
     Deletes raw files older than raw_files_days and rotates old logs.

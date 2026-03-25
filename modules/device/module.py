@@ -8,8 +8,11 @@ Handles device-level events from Tasker:
 Implements the ModuleInterface contract.
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -17,13 +20,16 @@ from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_float, safe_json
 from modules.device.parsers import PARSER_REGISTRY, SAFE_PARSER_REGISTRY
 
+if TYPE_CHECKING:
+    from core.database import Database
+
 log = get_logger("lifedata.device")
 
 
 class DeviceModule(ModuleInterface):
     """Device module — parses phone hardware and OS events."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._quarantined_files: list[str] = []
 
@@ -108,7 +114,7 @@ class DeviceModule(ModuleInterface):
         log.warning(f"No parser found for device file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived device metrics after ingestion.
 
         Processes all dates that have device events (not just today),
@@ -142,7 +148,7 @@ class DeviceModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("device", all_derived)
             log.info(f"Device derived: {inserted} inserted, {skipped} skipped")
 
-    def _compute_day_metrics(self, db, day: str, now_utc: str) -> list[Event]:
+    def _compute_day_metrics(self, db: Database, day: str, now_utc: str) -> list[Event]:
         """Compute all derived metrics for a single day."""
         derived: list[Event] = []
         # Use noon of the target day as the event timestamp for determinism
@@ -377,6 +383,6 @@ class DeviceModule(ModuleInterface):
         return derived
 
 
-def create_module(config: dict | None = None) -> DeviceModule:
+def create_module(config: dict[str, Any] | None = None) -> DeviceModule:
     """Factory function called by the orchestrator."""
     return DeviceModule(config)

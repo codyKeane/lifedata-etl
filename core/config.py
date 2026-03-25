@@ -21,7 +21,7 @@ log = logging.getLogger("lifedata.config")
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 
-def _resolve_env_var_match(m: re.Match) -> str:
+def _resolve_env_var_match(m: re.Match[str]) -> str:
     """Resolve a single ${ENV_VAR} match, warning if unset."""
     var_name = m.group(1)
     value = os.environ.get(var_name)

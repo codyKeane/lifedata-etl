@@ -20,13 +20,19 @@ Derived metrics (computed in post_ingest):
   body.derived/sleep_duration     → paired sleep_start/sleep_end duration
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_float, safe_json
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.body")
 
@@ -34,16 +40,17 @@ log = get_logger("lifedata.body")
 class BodyModule(ModuleInterface):
     """Body module — captures physiological and biometric data."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
-        self._parser_registry = None
+        self._parser_registry: dict[str, Any] | None = None
 
-    def _get_parsers(self):
+    def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.body.parsers import PARSER_REGISTRY
 
             self._parser_registry = PARSER_REGISTRY
+        assert self._parser_registry is not None
         return self._parser_registry
 
     @property
@@ -123,7 +130,7 @@ class BodyModule(ModuleInterface):
 
         for prefix, parser_fn in self._get_parsers().items():
             if basename.startswith(prefix):
-                events = parser_fn(file_path)
+                events: list[Event] = parser_fn(file_path)
                 if events:
                     log.info(f"Parsed {len(events)} events from {basename}")
                 return events
@@ -131,7 +138,7 @@ class BodyModule(ModuleInterface):
         log.warning(f"No parser found for body file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived body metrics after all events are ingested.
 
         Derived metrics:
@@ -154,10 +161,10 @@ class BodyModule(ModuleInterface):
             """,
             (today,),
         )
-        row = (
+        row: Any = (
             rows.fetchone()
             if hasattr(rows, "fetchone")
-            else (rows[0] if rows else None)
+            else (list(rows)[0] if rows else None)
         )
         if row and row[0] is not None and row[0] > 0:
             step_total = int(row[0])
@@ -319,7 +326,7 @@ class BodyModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("body", derived_events)
             log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily body metrics for report generation."""
         rows = db.execute(
             """
@@ -358,6 +365,6 @@ class BodyModule(ModuleInterface):
         }
 
 
-def create_module(config: dict | None = None) -> BodyModule:
+def create_module(config: dict[str, Any] | None = None) -> BodyModule:
     """Factory function called by the orchestrator."""
     return BodyModule(config)

@@ -6,7 +6,14 @@ Catches data quality issues: future timestamps, out-of-range values,
 suspicious duplicates, and time gaps in periodic sources.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from core.logger import get_logger
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.meta.quality")
 
@@ -28,7 +35,7 @@ PERIODIC_SOURCES = {
 }
 
 
-def validate_events(db, date_str: str) -> list[dict]:
+def validate_events(db: Database, date_str: str) -> list[dict[str, Any]]:
     """Run quality checks on a given date's data.
 
     Args:
@@ -38,7 +45,7 @@ def validate_events(db, date_str: str) -> list[dict]:
     Returns:
         List of issue dicts, each with 'type' and details.
     """
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
 
     # 1. Future timestamps
     issues.extend(_check_future_timestamps(db))
@@ -60,9 +67,9 @@ def validate_events(db, date_str: str) -> list[dict]:
     return issues
 
 
-def _check_future_timestamps(db) -> list[dict]:
+def _check_future_timestamps(db: Database) -> list[dict[str, Any]]:
     """Check for events with timestamps in the future."""
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
     try:
         cursor = db.execute(
             "SELECT COUNT(*) FROM events "
@@ -84,9 +91,9 @@ def _check_future_timestamps(db) -> list[dict]:
     return issues
 
 
-def _check_numeric_ranges(db, date_str: str) -> list[dict]:
+def _check_numeric_ranges(db: Database, date_str: str) -> list[dict[str, Any]]:
     """Check for values outside expected ranges."""
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
     for source, (min_val, max_val) in NUMERIC_RANGES.items():
         try:
             cursor = db.execute(
@@ -118,9 +125,9 @@ def _check_numeric_ranges(db, date_str: str) -> list[dict]:
     return issues
 
 
-def _check_suspicious_duplicates(db, date_str: str) -> list[dict]:
+def _check_suspicious_duplicates(db: Database, date_str: str) -> list[dict[str, Any]]:
     """Find instances where >5 events share the same source and second."""
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
     try:
         cursor = db.execute(
             "SELECT source_module, timestamp_utc, COUNT(*) as n "
@@ -150,9 +157,9 @@ def _check_suspicious_duplicates(db, date_str: str) -> list[dict]:
     return issues
 
 
-def _check_time_gaps(db, date_str: str) -> list[dict]:
+def _check_time_gaps(db: Database, date_str: str) -> list[dict[str, Any]]:
     """Find unusual gaps in periodic data sources."""
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
     for source, interval_min in PERIODIC_SOURCES.items():
         max_gap_min = interval_min * 3  # Allow 3x normal interval
         gaps = detect_time_gaps(db, source, date_str, max_gap_min)
@@ -175,8 +182,8 @@ def _check_time_gaps(db, date_str: str) -> list[dict]:
 
 
 def detect_time_gaps(
-    db, source_module: str, date_str: str, max_gap_min: int
-) -> list[dict]:
+    db: Database, source_module: str, date_str: str, max_gap_min: int
+) -> list[dict[str, Any]]:
     """Find gaps in periodic data that exceed max_gap_min.
 
     Args:
@@ -188,7 +195,7 @@ def detect_time_gaps(
     Returns:
         List of gap dicts with 'from', 'to', 'gap_minutes'.
     """
-    gaps: list[dict] = []
+    gaps: list[dict[str, Any]] = []
     try:
         cursor = db.execute(
             "SELECT timestamp_utc FROM events "

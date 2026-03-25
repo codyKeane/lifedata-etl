@@ -168,7 +168,12 @@ class Event:
         """Convenience: True if validate() returns no errors."""
         return len(self.validate()) == 0
 
-    def to_db_tuple(self) -> tuple:
+    def to_db_tuple(self) -> tuple[
+        str, str, str, str, str, str,
+        Optional[float], Optional[str], Optional[str], Optional[str],
+        Optional[float], Optional[float], Optional[str], float,
+        str, Optional[str], str,
+    ]:
         """Return a tuple matching the INSERT column order for the events table.
 
         Column order:

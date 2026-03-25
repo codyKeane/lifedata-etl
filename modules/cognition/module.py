@@ -22,15 +22,21 @@ Derived metrics (computed in post_ingest):
   cognition.derived / subjective_objective_gap
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.cognition")
 
@@ -38,11 +44,11 @@ log = get_logger("lifedata.cognition")
 class CognitionModule(ModuleInterface):
     """Cognition module — objective cognitive performance probes."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
-        self._parser_registry = None
+        self._parser_registry: dict[str, Any] | None = None
 
-    def _get_parsers(self):
+    def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.cognition.parsers import PARSER_REGISTRY
@@ -110,7 +116,7 @@ class CognitionModule(ModuleInterface):
 
         for prefix, parser_fn in self._get_parsers().items():
             if basename.startswith(prefix):
-                events = parser_fn(file_path)
+                events: list[Event] = parser_fn(file_path)
                 if events:
                     log.info(f"Parsed {len(events)} events from {basename}")
                 return events
@@ -118,7 +124,7 @@ class CognitionModule(ModuleInterface):
         log.warning(f"No parser found for cognition file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived cognition metrics after all events are ingested.
 
         Derived metrics:
@@ -160,7 +166,7 @@ class CognitionModule(ModuleInterface):
                 imp_event = self._compute_impairment_flag(
                     db,
                     date_str,
-                    cli_event.value_numeric,
+                    cli_event.value_numeric if cli_event.value_numeric is not None else 0.0,
                     baseline_days,
                     impairment_threshold,
                 )
@@ -185,10 +191,10 @@ class CognitionModule(ModuleInterface):
             )
 
     def _get_daily_rt_baseline(
-        self, db, date_str: str, baseline_days: int
+        self, db: Database, date_str: str, baseline_days: int
     ) -> list[Event]:
         """Compute daily RT baseline: median simple_rt for the day."""
-        events = []
+        events: list[Event] = []
 
         rows = db.execute(
             """
@@ -257,7 +263,7 @@ class CognitionModule(ModuleInterface):
 
         return events
 
-    def _compute_cognitive_load_index(self, db, date_str: str, baseline_days: int):
+    def _compute_cognitive_load_index(self, db: Database, date_str: str, baseline_days: int) -> Optional[Event]:
         """Weighted composite z-score across all available cognitive probes."""
         components = {}
 
@@ -332,8 +338,8 @@ class CognitionModule(ModuleInterface):
         )
 
     def _compute_impairment_flag(
-        self, db, date_str: str, cli_value: float, baseline_days: int, threshold: float
-    ):
+        self, db: Database, date_str: str, cli_value: float, baseline_days: int, threshold: float
+    ) -> Optional[Event]:
         """Binary flag: CLI > threshold σ above baseline (= impaired)."""
         rows = db.execute(
             """
@@ -382,7 +388,7 @@ class CognitionModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_peak_cognition_hour(self, db, baseline_days: int):
+    def _compute_peak_cognition_hour(self, db: Database, baseline_days: int) -> Optional[Event]:
         """Hour of day with best average probe scores (rolling window)."""
         rows = db.execute(
             """
@@ -400,7 +406,7 @@ class CognitionModule(ModuleInterface):
             """,
             (str(-baseline_days),),
         )
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+        result_set: list[Any] = rows.fetchall() if hasattr(rows, "fetchall") else list(rows)
         if not result_set:
             return None
 
@@ -426,7 +432,7 @@ class CognitionModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_subjective_objective_gap(self, db, date_str: str):
+    def _compute_subjective_objective_gap(self, db: Database, date_str: str) -> Optional[Event]:
         """Difference between self-reported energy/focus and probe performance."""
         # Get subjective scores from mind module
         subj_rows = db.execute(
@@ -464,7 +470,7 @@ class CognitionModule(ModuleInterface):
             """,
             (date_str,),
         )
-        rt_set = rt_rows.fetchall() if hasattr(rt_rows, "fetchall") else rt_rows
+        rt_set: list[Any] = rt_rows.fetchall() if hasattr(rt_rows, "fetchall") else list(rt_rows)
         if not rt_set or rt_set[0][0] is None:
             return None
 
@@ -483,10 +489,10 @@ class CognitionModule(ModuleInterface):
             """,
             (date_str, date_str),
         )
-        bl_set = (
+        bl_set: list[Any] = (
             baseline_rows.fetchall()
             if hasattr(baseline_rows, "fetchall")
-            else baseline_rows
+            else list(baseline_rows)
         )
         if not bl_set or bl_set[0][0] is None or bl_set[0][1] < 3:
             # Not enough baseline — use raw RT as a crude signal
@@ -540,13 +546,13 @@ class CognitionModule(ModuleInterface):
 
     def _zscore_metric(
         self,
-        db,
+        db: Database,
         date_str: str,
         baseline_days: int,
         source_module: str,
         event_type: str,
         invert: bool = False,
-    ):
+    ) -> Optional[float]:
         """Compute z-score for a metric on a given day vs rolling baseline."""
         # Today's value
         rows = db.execute(
@@ -559,10 +565,10 @@ class CognitionModule(ModuleInterface):
             """,
             (source_module, event_type, date_str),
         )
-        result = (
+        result: Any = (
             rows.fetchone()
             if hasattr(rows, "fetchone")
-            else (rows[0] if rows else None)
+            else (list(rows)[0] if rows else None)
         )
         if not result or result[0] is None:
             return None
@@ -590,10 +596,10 @@ class CognitionModule(ModuleInterface):
         if std_val < 0.01:
             return None
 
-        z = (today_val - mean_val) / std_val
+        z: float = (today_val - mean_val) / std_val
         return -z if invert else z
 
-    def _zscore_time_error(self, db, date_str: str, baseline_days: int):
+    def _zscore_time_error(self, db: Database, date_str: str, baseline_days: int) -> Optional[float]:
         """Z-score for absolute time production error."""
         rows = db.execute(
             """
@@ -652,9 +658,9 @@ class CognitionModule(ModuleInterface):
         if std_err < 0.01:
             return None
 
-        return (today_err - mean_err) / std_err
+        return float((today_err - mean_err) / std_err)
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily cognition metrics for report generation."""
         rows = db.execute(
             """
@@ -691,6 +697,6 @@ class CognitionModule(ModuleInterface):
         }
 
 
-def create_module(config: dict | None = None) -> CognitionModule:
+def create_module(config: dict[str, Any] | None = None) -> CognitionModule:
     """Factory function called by the orchestrator."""
     return CognitionModule(config)

@@ -6,15 +6,18 @@ Monitors Syncthing sync lag, database backup freshness,
 and Syncthing relay configuration.
 """
 
+from __future__ import annotations
+
 import os
 import time
+from typing import Any
 
 from core.logger import get_logger
 
 log = get_logger("lifedata.meta.sync")
 
 
-def check_sync_lag(raw_base: str) -> dict:
+def check_sync_lag(raw_base: str) -> dict[str, Any]:
     """Check if Syncthing is keeping up by examining newest file age.
 
     Args:
@@ -33,7 +36,7 @@ def check_sync_lag(raw_base: str) -> dict:
             "message": f"Raw base directory not found: {expanded}",
         }
 
-    newest_mtime = 0
+    newest_mtime: float = 0
     for root, _dirs, files in os.walk(expanded):
         for f in files:
             try:
@@ -72,7 +75,7 @@ def check_sync_lag(raw_base: str) -> dict:
     }
 
 
-def check_db_backup_age(db_path: str, max_age_days: int = 1) -> dict:
+def check_db_backup_age(db_path: str, max_age_days: int = 1) -> dict[str, Any]:
     """Verify a recent database backup exists.
 
     Args:
@@ -120,7 +123,7 @@ def check_db_backup_age(db_path: str, max_age_days: int = 1) -> dict:
 
 def verify_syncthing_relay(
     api_key: str, api_url: str = "http://localhost:8384"
-) -> dict:
+) -> dict[str, Any]:
     """Query the Syncthing REST API to verify relay is disabled.
 
     This is called BEFORE data ingestion as a security gate.

@@ -279,7 +279,7 @@ def parse_gonogo(file_path: str) -> list[Event]:
                 ts_utc, ts_local = parse_timestamp(epoch_str, tz)
 
                 trials = [t.split(":") for t in trial_data.split("|") if t]
-                go_rts = []
+                go_rts: list[int] = []
                 commission_errors = 0
                 omission_errors = 0
                 total_go = 0
@@ -295,7 +295,7 @@ def parse_gonogo(file_path: str) -> list[Event]:
 
                     if trial_type == "go":
                         total_go += 1
-                        if responded:
+                        if responded and rt is not None:
                             go_rts.append(rt)
                         if not correct:
                             omission_errors += 1
@@ -311,7 +311,7 @@ def parse_gonogo(file_path: str) -> list[Event]:
                             timezone_offset=tz,
                             source_module="cognition.reaction",
                             event_type="go_nogo",
-                            value_numeric=float(rt) if responded else None,
+                            value_numeric=float(rt) if rt is not None and responded else None,
                             value_json=safe_json(
                                 {
                                     "stimulus": trial_type,

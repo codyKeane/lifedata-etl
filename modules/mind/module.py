@@ -10,8 +10,11 @@ Supports both standard (auto-triggered) and manual entry variants.
 Implements the ModuleInterface contract.
 """
 
+from __future__ import annotations
+
 import os
 import statistics
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -19,13 +22,16 @@ from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
 from modules.mind.parsers import PARSER_REGISTRY
 
+if TYPE_CHECKING:
+    from core.database import Database
+
 log = get_logger("lifedata.mind")
 
 
 class MindModule(ModuleInterface):
     """Mind module — parses subjective check-in data from Tasker."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
 
     @property
@@ -103,7 +109,7 @@ class MindModule(ModuleInterface):
         log.warning(f"No parser found for mind file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived mind metrics after ingestion.
 
         Processes all dates with mind events. Derived metrics per day:
@@ -128,7 +134,7 @@ class MindModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("mind", all_derived)
             log.info(f"Mind derived: {inserted} inserted, {skipped} skipped")
 
-    def _compute_day_metrics(self, db, day: str) -> list[Event]:
+    def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute derived mind metrics for a single day."""
         derived: list[Event] = []
         day_ts = f"{day}T12:00:00-05:00"
@@ -289,7 +295,7 @@ class MindModule(ModuleInterface):
 
         return derived
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily mind metrics for report generation."""
         try:
             cursor = db.execute(
@@ -328,6 +334,6 @@ class MindModule(ModuleInterface):
         return summary if summary else None
 
 
-def create_module(config: dict | None = None) -> MindModule:
+def create_module(config: dict[str, Any] | None = None) -> MindModule:
     """Factory function called by the orchestrator."""
     return MindModule(config)

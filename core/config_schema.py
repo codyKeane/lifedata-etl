@@ -385,7 +385,7 @@ class RootConfig(BaseModel):
 # ── Validation entry point ──────────────────────────────────────
 
 
-def validate_config(config: dict) -> RootConfig:
+def validate_config(config: dict[str, Any]) -> RootConfig:
     """Validate a loaded (env-resolved) config dict against the schema.
 
     Performs structural validation via pydantic, then runs additional

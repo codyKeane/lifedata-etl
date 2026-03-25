@@ -11,6 +11,8 @@ Parses data files for the Oracle module:
   hours_*.json                     → oracle.planetary_hours / current_hour + day_ruler
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import math
@@ -471,7 +473,7 @@ def parse_rng_raw(file_path: str) -> list[Event]:
     CSV format: single line of 100 comma-separated byte values (0-255)
     Filename encodes timestamp: rng_raw_<epoch>.csv
     """
-    events = []
+    events: list[Event] = []
     basename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
     # Extract epoch from filename: rng_raw_<epoch>.csv
     parts = basename.replace(".csv", "").split("_")
@@ -549,7 +551,7 @@ def parse_schumann(file_path: str) -> list[Event]:
         "quality": "good|degraded"
     }
     """
-    events = []
+    events: list[Event] = []
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -656,7 +658,7 @@ def parse_planetary_hours(file_path: str) -> list[Event]:
         ]
     }
     """
-    events = []
+    events: list[Event] = []
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)

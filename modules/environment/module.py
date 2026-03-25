@@ -5,8 +5,11 @@ modules/environment/module.py
 Handles environmental data: hourly snapshots, geofence location, astronomy.
 """
 
+from __future__ import annotations
+
 import json
 import os
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -14,13 +17,16 @@ from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
 from modules.environment.parsers import PARSER_REGISTRY
 
+if TYPE_CHECKING:
+    from core.database import Database
+
 log = get_logger("lifedata.environment")
 
 
 class EnvironmentModule(ModuleInterface):
     """Environment module — parses environmental sensor and location data."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
 
     @property
@@ -93,7 +99,7 @@ class EnvironmentModule(ModuleInterface):
         log.warning(f"No parser found for environment file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived environment metrics after ingestion.
 
         Processes all dates that have environment events,
@@ -124,7 +130,7 @@ class EnvironmentModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("environment", all_derived)
             log.info(f"Environment derived: {inserted} inserted, {skipped} skipped")
 
-    def _compute_day_metrics(self, db, day: str) -> list[Event]:
+    def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute all derived metrics for a single day."""
         derived: list[Event] = []
         day_ts = f"{day}T12:00:00-05:00"
@@ -297,6 +303,6 @@ class EnvironmentModule(ModuleInterface):
         return derived
 
 
-def create_module(config: dict | None = None) -> EnvironmentModule:
+def create_module(config: dict[str, Any] | None = None) -> EnvironmentModule:
     """Factory function called by the orchestrator."""
     return EnvironmentModule(config)

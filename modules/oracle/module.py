@@ -21,15 +21,21 @@ Derived metrics (computed in post_ingest):
   oracle.planetary_hours.derived / activity_by_planet
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.oracle")
 
@@ -37,11 +43,11 @@ log = get_logger("lifedata.oracle")
 class OracleModule(ModuleInterface):
     """Oracle module — frontier data: divination, RNG, Schumann, planetary hours."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
-        self._parser_registry = None
+        self._parser_registry: dict[str, Any] | None = None
 
-    def _get_parsers(self):
+    def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.oracle.parsers import PARSER_REGISTRY
@@ -117,7 +123,7 @@ class OracleModule(ModuleInterface):
 
         for prefix, parser_fn in self._get_parsers().items():
             if basename.startswith(prefix):
-                events = parser_fn(file_path)
+                events: list[Event] = parser_fn(file_path)
                 if events:
                     log.info(f"Parsed {len(events)} events from {basename}")
                 return events
@@ -125,7 +131,7 @@ class OracleModule(ModuleInterface):
         log.warning(f"No parser found for oracle file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived oracle metrics after all events are ingested.
 
         Derived metrics:
@@ -183,7 +189,7 @@ class OracleModule(ModuleInterface):
             log.info(f"Oracle derived metrics: {inserted} inserted, {skipped} skipped")
 
     def _compute_hexagram_frequency(
-        self, db, latest_date: str | None = None
+        self, db: Database, latest_date: str | None = None
     ) -> Event | None:
         """Distribution of hexagrams over the rolling analysis window."""
         window_days = self._config.get("analysis_window_days", 90)
@@ -229,7 +235,7 @@ class OracleModule(ModuleInterface):
                     "distribution": distribution,
                     "total_castings": total,
                     "unique_hexagrams": len(distribution),
-                    "most_common": max(distribution, key=distribution.get),
+                    "most_common": max(distribution, key=lambda k: distribution[k]),
                     "window_days": window_days,
                 }
             ),
@@ -238,7 +244,7 @@ class OracleModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_entropy_test(self, db, latest_date: str | None = None) -> Event | None:
+    def _compute_entropy_test(self, db: Database, latest_date: str | None = None) -> Event | None:
         """Chi-squared uniformity test on hexagram distribution."""
         window_days = self._config.get("analysis_window_days", 90)
 
@@ -305,7 +311,7 @@ class OracleModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_rng_daily_deviation(self, db, date_str: str) -> Event | None:
+    def _compute_rng_daily_deviation(self, db: Database, date_str: str) -> Event | None:
         """Z-score of daily RNG mean vs expected 127.5."""
         rows = db.execute(
             """
@@ -362,7 +368,7 @@ class OracleModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_schumann_daily_summary(self, db, date_str: str) -> Event | None:
+    def _compute_schumann_daily_summary(self, db: Database, date_str: str) -> Event | None:
         """Mean/min/max/excursion count for Schumann resonance."""
         rows = db.execute(
             """
@@ -413,7 +419,7 @@ class OracleModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_activity_by_planet(self, db, date_str: str) -> Event | None:
+    def _compute_activity_by_planet(self, db: Database, date_str: str) -> Event | None:
         """Cross-query mood/energy by ruling planet for the day."""
         # Get planetary hours for this date
         hours_rows = db.execute(
@@ -434,7 +440,7 @@ class OracleModule(ModuleInterface):
             return None
 
         # Collect planet → time ranges
-        planet_ranges = {}
+        planet_ranges: dict[str, list[tuple[str, str]]] = {}
         for row in hours_set:
             planet = row[0]
             try:
@@ -524,7 +530,7 @@ class OracleModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily oracle metrics for report generation."""
         rows = db.execute(
             """
@@ -561,6 +567,6 @@ class OracleModule(ModuleInterface):
         }
 
 
-def create_module(config: dict | None = None) -> OracleModule:
+def create_module(config: dict[str, Any] | None = None) -> OracleModule:
     """Factory function called by the orchestrator."""
     return OracleModule(config)

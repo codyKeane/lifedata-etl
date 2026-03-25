@@ -249,7 +249,7 @@ class Orchestrator:
         report: bool = False,
         single_module: str | None = None,
         dry_run: bool = False,
-    ) -> dict:
+    ) -> dict[str, object]:
         """Main ETL execution.
 
         Args:

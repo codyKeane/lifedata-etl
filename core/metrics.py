@@ -12,7 +12,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -30,11 +30,11 @@ class ModuleMetrics:
     duration_sec: float = 0.0
     error: Optional[str] = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ModuleMetrics":
+    def from_dict(cls, d: dict[str, Any]) -> "ModuleMetrics":
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
@@ -60,17 +60,16 @@ class ETLMetrics:
         """Return module IDs that have status 'failed'."""
         return [m.module_id for m in self.modules.values() if m.status == "failed"]
 
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        # asdict converts ModuleMetrics to plain dicts already
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = asdict(self)
         return d
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), separators=(",", ":"))
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ETLMetrics":
-        modules_raw = d.pop("modules", {})
+    def from_dict(cls, d: dict[str, Any]) -> "ETLMetrics":
+        modules_raw: dict[str, Any] = d.pop("modules", {})
         modules = {
             k: ModuleMetrics.from_dict(v) if isinstance(v, dict) else v
             for k, v in modules_raw.items()

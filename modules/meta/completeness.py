@@ -7,7 +7,14 @@ Compares actual event counts per source_module against expected minimums
 and flags missing or underperforming data streams.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from core.logger import get_logger
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.meta.completeness")
 
@@ -35,7 +42,7 @@ OPTIONAL_DAILY_SOURCES = [
 ]
 
 
-def check_daily_completeness(db, date_str: str) -> dict:
+def check_daily_completeness(db: Database, date_str: str) -> dict[str, Any]:
     """Check data completeness for a given date.
 
     Args:
@@ -45,7 +52,7 @@ def check_daily_completeness(db, date_str: str) -> dict:
     Returns:
         Dict with keys: date, required, optional, overall_pct, missing, warnings.
     """
-    report = {
+    report: dict[str, Any] = {
         "date": date_str,
         "required": {},
         "optional": {},

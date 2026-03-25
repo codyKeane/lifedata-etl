@@ -6,8 +6,11 @@ Handles communication and social interaction data: notifications, calls,
 SMS, app usage, and WiFi connectivity.
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -15,13 +18,16 @@ from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
 from modules.social.parsers import PARSER_REGISTRY
 
+if TYPE_CHECKING:
+    from core.database import Database
+
 log = get_logger("lifedata.social")
 
 
 class SocialModule(ModuleInterface):
     """Social module — parses communication and app usage data."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
 
     @property
@@ -93,7 +99,7 @@ class SocialModule(ModuleInterface):
         log.warning(f"No parser found for social file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute derived social metrics after ingestion.
 
         Processes all dates with social events. Derived metrics per day:
@@ -118,7 +124,7 @@ class SocialModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("social", all_derived)
             log.info(f"Social derived: {inserted} inserted, {skipped} skipped")
 
-    def _compute_day_metrics(self, db, day: str) -> list[Event]:
+    def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute derived social metrics for a single day."""
         derived: list[Event] = []
         day_ts = f"{day}T12:00:00-05:00"
@@ -321,6 +327,6 @@ class SocialModule(ModuleInterface):
         return derived
 
 
-def create_module(config: dict | None = None) -> SocialModule:
+def create_module(config: dict[str, Any] | None = None) -> SocialModule:
     """Factory function called by the orchestrator."""
     return SocialModule(config)

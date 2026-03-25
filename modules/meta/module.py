@@ -12,12 +12,18 @@ doesn't parse files — it inspects the database and filesystem during
 post_ingest.
 """
 
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import safe_json, today_local
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.meta")
 
@@ -28,7 +34,7 @@ DEFAULT_TZ_OFFSET = "-0500"
 class MetaModule(ModuleInterface):
     """Meta module — monitors LifeData system health."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
 
     @property
@@ -61,7 +67,7 @@ class MetaModule(ModuleInterface):
         # Meta module doesn't parse files
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Run all health checks after other modules finish.
 
         Each check is gated by its config flag. Errors in individual
@@ -311,7 +317,7 @@ class MetaModule(ModuleInterface):
             except Exception as e:
                 log.error(f"Failed to insert meta events: {e}", exc_info=True)
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return meta health metrics for report generation."""
         try:
             cursor = db.execute(
@@ -332,7 +338,7 @@ class MetaModule(ModuleInterface):
         if not rows:
             return None
 
-        summary: dict = {}
+        summary: dict[str, Any] = {}
         for source, etype, val_num, val_json in rows:
             key = f"{source}.{etype}"
             if key not in summary:
@@ -347,7 +353,7 @@ class MetaModule(ModuleInterface):
 
         return summary if summary else None
 
-    def _build_full_config(self) -> dict:
+    def _build_full_config(self) -> dict[str, Any]:
         """Build a config dict suitable for storage_report.
 
         The module config only contains meta-specific keys.
@@ -366,13 +372,13 @@ class MetaModule(ModuleInterface):
 
     def _get_raw_base(self) -> str:
         """Get raw_base path from config or default."""
-        return self._config.get("_raw_base", "~/LifeData/raw/LifeData")
+        return str(self._config.get("_raw_base", "~/LifeData/raw/LifeData"))
 
     def _get_db_path(self) -> str:
         """Get db_path from config or default."""
-        return self._config.get("_db_path", "~/LifeData/db/lifedata.db")
+        return str(self._config.get("_db_path", "~/LifeData/db/lifedata.db"))
 
 
-def create_module(config: dict | None = None) -> MetaModule:
+def create_module(config: dict[str, Any] | None = None) -> MetaModule:
     """Factory function called by the orchestrator."""
     return MetaModule(config)

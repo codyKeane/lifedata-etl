@@ -155,7 +155,7 @@ def glob_files(
     return sorted(files)
 
 
-def safe_float(value) -> Optional[float]:
+def safe_float(value: object) -> Optional[float]:
     """Parse a value to float, returning None on failure.
 
     Handles strings, ints, floats, and None gracefully.
@@ -164,7 +164,7 @@ def safe_float(value) -> Optional[float]:
     if value is None:
         return None
     try:
-        result = float(value)
+        result = float(str(value)) if not isinstance(value, (int, float)) else float(value)
         # Reject NaN and Inf — these corrupt database queries
         if result != result or result == float("inf") or result == float("-inf"):
             return None
@@ -173,7 +173,7 @@ def safe_float(value) -> Optional[float]:
         return None
 
 
-def safe_int(value) -> Optional[int]:
+def safe_int(value: object) -> Optional[int]:
     """Parse a value to int, returning None on failure.
 
     Never raises an exception.
@@ -181,12 +181,12 @@ def safe_int(value) -> Optional[int]:
     if value is None:
         return None
     try:
-        return int(float(value))
+        return int(float(str(value)) if not isinstance(value, (int, float)) else float(value))
     except (ValueError, TypeError):
         return None
 
 
-def safe_json(obj) -> str:
+def safe_json(obj: object) -> str:
     """Serialize an object to a JSON string.
 
     Handles edge cases: None values, non-serializable types converted to str.

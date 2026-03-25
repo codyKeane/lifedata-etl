@@ -10,6 +10,8 @@ import os
 import shutil
 import sqlite3
 from datetime import datetime, timezone
+from types import TracebackType
+from collections.abc import Sequence
 from typing import Optional
 
 from core.event import Event
@@ -321,7 +323,7 @@ class Database:
     ) -> int:
         """Count events matching optional filters."""
         query = "SELECT COUNT(*) FROM events WHERE 1=1"
-        params: list = []
+        params: list[str] = []
         if source_module:
             query += " AND source_module = ?"
             params.append(source_module)
@@ -341,13 +343,13 @@ class Database:
         min_confidence: float = 0.0,
         limit: int = 1000,
         order: str = "timestamp_utc DESC",
-    ) -> list[dict]:
+    ) -> list[dict[str, object]]:
         """Flexible event query with optional filters.
 
         Returns list of dicts (from sqlite3.Row).
         """
         query = "SELECT * FROM events WHERE 1=1"
-        params: list = []
+        params: list[object] = []
 
         if source_module:
             query += " AND source_module = ?"
@@ -404,7 +406,7 @@ class Database:
         log.info(f"Executing migration: {sql[:80]}...")
         return self.conn.execute(sql)
 
-    def execute(self, sql: str, params: Optional[list] = None) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: Optional[Sequence[object]] = None) -> sqlite3.Cursor:
         """Execute SQL with optional parameters.
 
         WARNING: This method accepts arbitrary SQL. Callers must validate
@@ -441,9 +443,13 @@ class Database:
         if self.conn:
             self.conn.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "Database":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         self.close()
-        return False

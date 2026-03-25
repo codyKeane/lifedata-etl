@@ -14,16 +14,22 @@ File discovery pattern:
   raw/api/gdelt/events_*.json    → world.gdelt     (GDELT DOC API)
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 from collections import Counter
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_float, safe_json
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.world")
 
@@ -31,17 +37,18 @@ log = get_logger("lifedata.world")
 class WorldModule(ModuleInterface):
     """World module — captures exogenous context from news, markets, RSS, GDELT."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         # Lazy import to avoid circular dependencies at module load time
-        self._parser_registry = None
+        self._parser_registry: dict[str, Any] | None = None
 
-    def _get_parsers(self):
+    def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
         if self._parser_registry is None:
             from modules.world.parsers import PARSER_REGISTRY
 
             self._parser_registry = PARSER_REGISTRY
+        assert self._parser_registry is not None
         return self._parser_registry
 
     @property
@@ -113,7 +120,7 @@ class WorldModule(ModuleInterface):
 
         for prefix, parser_fn in self._get_parsers().items():
             if basename.startswith(prefix):
-                events = parser_fn(file_path)
+                events: list[Event] = parser_fn(file_path)
                 if events:
                     log.info(f"Parsed {len(events)} events from {basename}")
                 return events
@@ -121,7 +128,7 @@ class WorldModule(ModuleInterface):
         log.warning(f"No parser found for world file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute and store derived metrics after all world events are ingested.
 
         Derived metrics:
@@ -218,7 +225,7 @@ class WorldModule(ModuleInterface):
             inserted, skipped = db.insert_events_for_module("world", derived_events)
             log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily summary metrics for the report generator."""
         rows = db.execute(
             """
@@ -256,6 +263,6 @@ class WorldModule(ModuleInterface):
         }
 
 
-def create_module(config: dict | None = None) -> WorldModule:
+def create_module(config: dict[str, Any] | None = None) -> WorldModule:
     """Factory function called by the orchestrator."""
     return WorldModule(config)

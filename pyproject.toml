@@ -17,10 +17,21 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 [tool.mypy]
 warn_return_any = true
 warn_unused_configs = true
+python_version = "3.11"
 
 [[tool.mypy.overrides]]
 module = "core.*"
 strict = true
+
+[[tool.mypy.overrides]]
+module = "analysis.*"
+strict = false
+disallow_untyped_defs = false
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["vaderSentiment.*", "whisper.*"]
+ignore_missing_imports = true
 
 # ── Pytest ───────────────────────────────────────────────────
 

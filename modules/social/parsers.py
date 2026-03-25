@@ -10,9 +10,12 @@ Parses Tasker-generated CSV files for social/communication data:
   - wifi_*.csv          → social.wifi (network/connectivity events)
 """
 
+from __future__ import annotations
+
 import hashlib
 import hmac
 import os
+from typing import Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -153,7 +156,7 @@ def parse_calls(file_path: str) -> list[Event]:
                 phone_hash = _hash_phone(phone_raw)
                 contact_hash = _hash_contact(contact_raw)
 
-                extra = {
+                extra: dict[str, Any] = {
                     "contact_hash": contact_hash,
                     "phone_hash": phone_hash,
                 }

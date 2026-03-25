@@ -8,7 +8,10 @@ Parses Tasker-generated CSV files for environment data:
   - astro_*.csv      → environment.astro
 """
 
+from __future__ import annotations
+
 import re
+from typing import Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -178,7 +181,7 @@ def parse_astro(file_path: str) -> list[Event]:
                 moon_illum = safe_float(fields[3]) if len(fields) > 3 else None
                 sun_hours = safe_float(fields[4]) if len(fields) > 4 else None
 
-                extra = {}
+                extra: dict[str, Any] = {}
                 if moon_day is not None:
                     extra["moon_day"] = moon_day
                 if moon_phase:

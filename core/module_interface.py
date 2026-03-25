@@ -6,8 +6,13 @@ Abstract base class that every LifeData module must implement.
 This is the contract between modules and the orchestrator.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 from core.event import Event
 
@@ -63,14 +68,14 @@ class ModuleInterface(ABC):
         """
         ...
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Optional hook: runs after all events are ingested.
 
         Use for materialized views, daily summaries, derived metrics, etc.
         """
         pass
 
-    def get_daily_summary(self, db, date_str: str) -> Optional[dict]:
+    def get_daily_summary(self, db: Database, date_str: str) -> Optional[dict[str, Any]]:
         """Optional: return a dict of daily metrics for this module."""
         return None
 

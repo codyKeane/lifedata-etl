@@ -13,8 +13,11 @@ Parses CSV files for physiological and biometric data:
   - reaction_*.csv   → body.cognition (reaction time)
 """
 
+from __future__ import annotations
+
 import json
 import os
+from typing import Any
 
 from core.event import Event
 from core.logger import get_logger
@@ -77,7 +80,7 @@ def parse_quicklog(file_path: str) -> list[Event]:
 
                 value_numeric = safe_float(value_str)
                 value_text = None
-                value_json_data = {}
+                value_json_data: dict[str, Any] = {}
 
                 if location:
                     value_json_data["location"] = location

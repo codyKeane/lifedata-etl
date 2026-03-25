@@ -61,7 +61,7 @@ def truncate_coordinates(text: str) -> str:
     32.776700 → 32.77***
     -96.797000 → -96.79***
     """
-    def _trunc(m: re.Match) -> str:
+    def _trunc(m: re.Match[str]) -> str:
         integer = m.group(1)
         decimals = m.group(2)
         return f"{integer}.{decimals[:2]}***"

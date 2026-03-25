@@ -27,16 +27,22 @@ Derived metrics (computed in post_ingest):
   behavior.derived / behavioral_consistency
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 from collections import Counter
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
 from core.utils import glob_files, safe_json
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 log = get_logger("lifedata.behavior")
 
@@ -44,7 +50,7 @@ log = get_logger("lifedata.behavior")
 class BehaviorModule(ModuleInterface):
     """Behavior module — passive behavioral exhaust metrics."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
 
     @property
@@ -146,7 +152,7 @@ class BehaviorModule(ModuleInterface):
         log.warning(f"No parser found for behavior file: {basename}")
         return []
 
-    def post_ingest(self, db) -> None:
+    def post_ingest(self, db: Database) -> None:
         """Compute all derived behavioral metrics after ingestion.
 
         Derived metrics computed per day:
@@ -248,7 +254,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Hourly app switch rates ────────────────────────────────
 
-    def _compute_hourly_rates(self, db, date_str: str, day_ts: str) -> list[Event]:
+    def _compute_hourly_rates(self, db: Database, date_str: str, day_ts: str) -> list[Event]:
         """Compute app switches per hour for each active hour."""
         events = []
         rows = db.execute(
@@ -288,7 +294,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Fragmentation index ────────────────────────────────────
 
-    def _compute_fragmentation_index(self, db, date_str: str, day_ts: str):
+    def _compute_fragmentation_index(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """0-100 scale of attention fragmentation.
 
         Components:
@@ -391,7 +397,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Daily steps total ──────────────────────────────────────
 
-    def _compute_daily_steps(self, db, date_str: str, day_ts: str):
+    def _compute_daily_steps(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Sum hourly step counts into a daily total."""
         rows = db.execute(
             """
@@ -434,7 +440,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Movement entropy ───────────────────────────────────────
 
-    def _compute_movement_entropy(self, db, date_str: str, day_ts: str):
+    def _compute_movement_entropy(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Shannon entropy of hourly step distribution (0-1 normalized).
 
         High = steps spread evenly (active lifestyle).
@@ -499,7 +505,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Sedentary bouts ────────────────────────────────────────
 
-    def _compute_sedentary_bouts(self, db, date_str: str, day_ts: str):
+    def _compute_sedentary_bouts(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Find consecutive waking hours with <threshold steps."""
         threshold = self._config.get("sedentary_threshold", 50)
         min_bout = self._config.get("sedentary_min_bout_hours", 2)
@@ -528,8 +534,8 @@ class BehaviorModule(ModuleInterface):
                 hourly[h] = int(s)
 
         # Detect bouts during waking hours (6-23)
-        bouts = []
-        bout_start = None
+        bouts: list[dict[str, Any]] = []
+        bout_start: int | None = None
         bout_len = 0
 
         for h in range(6, 24):
@@ -587,7 +593,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Unlock hourly summary ──────────────────────────────────
 
-    def _compute_unlock_summary(self, db, date_str: str, day_ts: str):
+    def _compute_unlock_summary(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Summary stats for unlock latency over the day."""
         rows = db.execute(
             """
@@ -634,7 +640,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Dream frequency ────────────────────────────────────────
 
-    def _compute_dream_frequency(self, db, date_str: str, day_ts: str):
+    def _compute_dream_frequency(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Rolling 7-day dream log count."""
         rows = db.execute(
             """
@@ -672,7 +678,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Attention span estimate ────────────────────────────────
 
-    def _compute_attention_span(self, db, date_str: str, day_ts: str):
+    def _compute_attention_span(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Median app dwell time, excluding calls/media/launcher."""
         rows = db.execute(
             """
@@ -742,7 +748,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Morning inertia ────────────────────────────────────────
 
-    def _compute_morning_inertia(self, db, date_str: str, day_ts: str):
+    def _compute_morning_inertia(self, db: Database, date_str: str, day_ts: str) -> Optional[Event]:
         """Minutes from first screen_on to first productive app usage.
 
         Uses the same productive_keywords as the social module's
@@ -837,8 +843,8 @@ class BehaviorModule(ModuleInterface):
     # ─── Digital restlessness ───────────────────────────────────
 
     def _compute_digital_restlessness(
-        self, db, date_str: str, day_ts: str, baseline_days: int
-    ):
+        self, db: Database, date_str: str, day_ts: str, baseline_days: int
+    ) -> Optional[Event]:
         """Composite z-score: app switches + unlock frequency + screen time.
 
         Weights: frag × 0.4, unlocks × 0.3, screen_time × 0.3.
@@ -937,8 +943,8 @@ class BehaviorModule(ModuleInterface):
     # ─── Behavioral consistency ─────────────────────────────────
 
     def _compute_behavioral_consistency(
-        self, db, date_str: str, day_ts: str, baseline_days: int
-    ):
+        self, db: Database, date_str: str, day_ts: str, baseline_days: int
+    ) -> Optional[Event]:
         """Std of today's hourly activity pattern vs 14-day profile.
 
         Low score = routine is consistent = healthy.
@@ -987,7 +993,7 @@ class BehaviorModule(ModuleInterface):
             """,
             (date_str, str(-baseline_days), date_str),
         )
-        bl_set = bl_rows.fetchall() if hasattr(bl_rows, "fetchall") else bl_rows
+        bl_set: list[Any] = bl_rows.fetchall() if hasattr(bl_rows, "fetchall") else list(bl_rows)
         if not bl_set or len(bl_set) < 3:
             return None
 
@@ -1031,7 +1037,7 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Helper methods ─────────────────────────────────────────
 
-    def _get_today_metric(self, db, date_str: str, source_module: str, event_type: str):
+    def _get_today_metric(self, db: Database, date_str: str, source_module: str, event_type: str) -> Optional[float]:
         """Get today's value for a specific derived metric."""
         rows = db.execute(
             """
@@ -1048,13 +1054,13 @@ class BehaviorModule(ModuleInterface):
 
     def _zscore_against_baseline(
         self,
-        db,
+        db: Database,
         date_str: str,
         baseline_days: int,
         today_val: float,
         source_module: str,
         event_type: str,
-    ):
+    ) -> Optional[float]:
         """Z-score today's value against a rolling baseline."""
         rows = db.execute(
             """
@@ -1076,11 +1082,11 @@ class BehaviorModule(ModuleInterface):
         if std_val < 0.01:
             return None
 
-        return (today_val - mean_val) / std_val
+        return float((today_val - mean_val) / std_val)
 
     def _zscore_unlock_count(
-        self, db, date_str: str, baseline_days: int, today_count: int
-    ):
+        self, db: Database, date_str: str, baseline_days: int, today_count: int
+    ) -> Optional[float]:
         """Z-score today's unlock count against baseline daily counts."""
         rows = db.execute(
             """
@@ -1104,9 +1110,9 @@ class BehaviorModule(ModuleInterface):
         if std_c < 0.01:
             return None
 
-        return (today_count - mean_c) / std_c
+        return float((today_count - mean_c) / std_c)
 
-    def get_daily_summary(self, db, date_str: str) -> dict | None:
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily behavior metrics for report generation."""
         rows = db.execute(
             """
@@ -1143,6 +1149,6 @@ class BehaviorModule(ModuleInterface):
         }
 
 
-def create_module(config: dict | None = None) -> BehaviorModule:
+def create_module(config: dict[str, Any] | None = None) -> BehaviorModule:
     """Factory function called by the orchestrator."""
     return BehaviorModule(config)
