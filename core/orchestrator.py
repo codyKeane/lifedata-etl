@@ -19,6 +19,7 @@ from core.config import load_config
 from core.config_schema import ConfigValidationError, RootConfig
 from core.database import Database
 from core.logger import get_logger, setup_logging
+from core.metrics import ETLMetrics, ModuleMetrics, write_metrics
 from core.module_interface import ModuleInterface
 
 log = get_logger("lifedata.orchestrator")
@@ -175,17 +176,18 @@ class Orchestrator:
             log.warning("No modules loaded — nothing to do")
             return {"total_events": 0, "failed_modules": [], "modules_run": 0}
 
+        metrics = ETLMetrics(
+            started_utc=datetime.now(timezone.utc).isoformat(),
+        )
         run_start = time.time()
-        total_events = 0
-        total_skipped = 0
-        failed_modules: list[str] = []
-        module_metrics: dict[str, dict] = {}
         all_quarantined: list[str] = []
         raw_base = os.path.expanduser(self.config.lifedata.raw_base)
         stability_seconds = self.config.lifedata.etl.file_stability_seconds
 
         for module in self.modules:
             log.info(f"[{module.module_id}] Starting module run")
+            mod_start = time.time()
+            mm = ModuleMetrics(module_id=module.module_id, status="success")
 
             try:
                 # Schema migrations (DDL only)
@@ -194,6 +196,7 @@ class Orchestrator:
 
                 # Discover files → validate paths → filter extensions
                 all_files = module.discover_files(raw_base)
+                mm.files_discovered = len(all_files)
 
                 safe_files = []
                 now = time.time()
@@ -228,6 +231,7 @@ class Orchestrator:
                         continue
                     safe_files.append(f)
 
+                mm.files_parsed = len(safe_files)
                 rejected = len(all_files) - len(safe_files)
                 log.info(
                     f"[{module.module_id}] Found {len(safe_files)} safe files"
@@ -249,6 +253,7 @@ class Orchestrator:
                     except Exception as e:
                         log.warning(f"[{module.module_id}] Failed to parse {f}: {e}")
 
+                mm.events_parsed = len(events)
                 log.info(f"[{module.module_id}] Parsed {len(events)} events")
 
                 # Insert (SAVEPOINT-wrapped per module)
@@ -263,8 +268,8 @@ class Orchestrator:
                         module.module_id, events
                     )
 
-                total_events += inserted
-                total_skipped += skipped
+                mm.events_ingested = inserted
+                mm.events_skipped = skipped
 
                 log.info(
                     f"[{module.module_id}] Ingested {inserted} events"
@@ -275,6 +280,7 @@ class Orchestrator:
                 if hasattr(module, "quarantined_files"):
                     qfiles = module.quarantined_files
                     if qfiles:
+                        mm.files_quarantined = len(qfiles)
                         all_quarantined.extend(qfiles)
                         log.warning(
                             f"[{module.module_id}] {len(qfiles)} file(s) quarantined"
@@ -298,16 +304,11 @@ class Orchestrator:
                     success=True,
                 )
 
-                module_metrics[module.module_id] = {
-                    "events": inserted,
-                    "errors": 0,
-                }
-
             except Exception as e:
                 log.error(f"[{module.module_id}] MODULE FAILED: {e}", exc_info=True)
-                failed_modules.append(module.module_id)
-                # Truncate and sanitize error for storage
                 error_msg = str(e)[:200]
+                mm.status = "failed"
+                mm.error = error_msg
                 self.db.update_module_status(
                     module.module_id,
                     display_name=module.display_name,
@@ -315,14 +316,45 @@ class Orchestrator:
                     success=False,
                     error=error_msg,
                 )
-                module_metrics[module.module_id] = {
-                    "events": 0,
-                    "errors": 1,
-                }
 
+            mm.duration_sec = round(time.time() - mod_start, 3)
+            metrics.modules[module.module_id] = mm
+
+        # Aggregate totals from per-module metrics
+        metrics.duration_sec = round(time.time() - run_start, 2)
+        metrics.finished_utc = datetime.now(timezone.utc).isoformat()
+        metrics.total_events_parsed = sum(
+            m.events_parsed for m in metrics.modules.values()
+        )
+        metrics.total_events_ingested = sum(
+            m.events_ingested for m in metrics.modules.values()
+        )
+        metrics.total_events_skipped = sum(
+            m.events_skipped for m in metrics.modules.values()
+        )
+        metrics.total_files_discovered = sum(
+            m.files_discovered for m in metrics.modules.values()
+        )
+        metrics.total_files_quarantined = sum(
+            m.files_quarantined for m in metrics.modules.values()
+        )
+
+        # System stats
+        db_path = os.path.expanduser(self.config.lifedata.db_path)
+        try:
+            metrics.db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
+        except OSError:
+            pass
+        try:
+            disk = shutil.disk_usage(os.path.expanduser("~/LifeData"))
+            metrics.disk_free_gb = round(disk.free / (1024**3), 2)
+        except OSError:
+            pass
+
+        failed_modules = metrics.failed_modules()
         log.info(
-            f"ETL complete: {total_events} new events, "
-            f"{total_skipped} skipped, "
+            f"ETL complete: {metrics.total_events_ingested} new events, "
+            f"{metrics.total_events_skipped} skipped, "
             f"{len(failed_modules)} failed modules"
         )
 
@@ -343,56 +375,22 @@ class Orchestrator:
             except Exception as e:
                 log.error(f"Report generation failed: {e}", exc_info=True)
 
-        # Export run metrics
-        self._write_metrics(run_start, module_metrics, dry_run)
+        # Persist structured metrics
+        try:
+            write_metrics(metrics)
+            log.info("Metrics written to metrics.jsonl")
+        except OSError as e:
+            log.warning(f"Failed to write metrics: {e}")
 
         summary = {
-            "total_events": total_events,
-            "total_skipped": total_skipped,
+            "total_events": metrics.total_events_ingested,
+            "total_skipped": metrics.total_events_skipped,
             "failed_modules": failed_modules,
             "modules_run": len(self.modules),
             "affected_dates": sorted(self.db.get_affected_dates()),
             "quarantined_files": all_quarantined,
+            "metrics": metrics,
         }
 
         log.info("=" * 60)
         return summary
-
-    def _write_metrics(
-        self,
-        run_start: float,
-        module_metrics: dict[str, dict],
-        dry_run: bool,
-    ) -> None:
-        """Append a JSON-lines entry to logs/metrics.jsonl."""
-        duration = round(time.time() - run_start, 2)
-        db_path = os.path.expanduser(self.config.lifedata.db_path)
-
-        try:
-            db_size_bytes = os.path.getsize(db_path)
-        except OSError:
-            db_size_bytes = 0
-
-        disk = shutil.disk_usage(os.path.expanduser("~/LifeData"))
-
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "duration_seconds": duration,
-            "dry_run": dry_run,
-            "events_per_module": {m: d["events"] for m, d in module_metrics.items()},
-            "errors_per_module": {m: d["errors"] for m, d in module_metrics.items()},
-            "total_events": sum(d["events"] for d in module_metrics.values()),
-            "total_errors": sum(d["errors"] for d in module_metrics.values()),
-            "db_size_bytes": db_size_bytes,
-            "disk_free_bytes": disk.free,
-        }
-
-        metrics_path = os.path.expanduser("~/LifeData/logs/metrics.jsonl")
-        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
-
-        try:
-            with open(metrics_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
-            log.info(f"Metrics written to {metrics_path}")
-        except OSError as e:
-            log.warning(f"Failed to write metrics: {e}")

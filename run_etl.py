@@ -16,7 +16,6 @@ Cron (nightly at 11:55 PM):
 
 import argparse
 import fcntl
-import json
 import os
 import sys
 from datetime import datetime
@@ -68,116 +67,115 @@ def _acquire_lock():
     return lock_fd
 
 
-METRICS_PATH = os.path.expanduser("~/LifeData/logs/metrics.jsonl")
-
-
-def _read_last_n_lines(path: str, n: int) -> list[str]:
-    """Read the last n lines from a file efficiently."""
-    try:
-        with open(path, "rb") as f:
-            # Seek to end and read backwards to find n newlines
-            f.seek(0, 2)
-            size = f.tell()
-            if size == 0:
-                return []
-            # Read up to 64KB from the end — plenty for 7 JSON lines
-            chunk = min(size, 65536)
-            f.seek(size - chunk)
-            lines = f.read().decode("utf-8").strip().splitlines()
-            return lines[-n:]
-    except FileNotFoundError:
-        return []
-
-
-def _format_bytes(n: int) -> str:
-    """Format byte count as human-readable string."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
+from core.metrics import read_last_n_metrics, ETLMetrics
 
 
 def _print_status() -> int:
-    """Read last 7 metrics entries and print a health summary table."""
-    lines = _read_last_n_lines(METRICS_PATH, 7)
+    """Read last 7 metrics entries and print a health summary table with warnings."""
+    entries = read_last_n_metrics(7)
 
-    if not lines:
+    if not entries:
         print("No metrics found. Run the ETL at least once first.")
         return 0
 
-    entries = []
-    for line in lines:
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-
-    if not entries:
-        print("No valid metrics entries found.")
-        return 0
-
-    # Collect all module names across all entries
-    all_modules = sorted(
-        {m for e in entries for m in e.get("events_per_module", {})}
-    )
-
     # Header
     print()
-    print("╔══════════════════════════════════════════════════════════════╗")
-    print("║              LifeData ETL — Health Summary                  ║")
-    print("╚══════════════════════════════════════════════════════════════╝")
+    print("╔══════════════════════════════════════════════════════════════════════════╗")
+    print("║                      LifeData ETL — Health Summary                      ║")
+    print("╚══════════════════════════════════════════════════════════════════════════╝")
     print()
 
-    # Run history table
-    header = f"{'Run Time':<22} {'Duration':>8} {'Events':>7} {'Errors':>7} {'Dry?':>5}"
+    # Run history table — columns: date, duration, events ingested, failed modules, db size, disk free
+    header = (
+        f"{'Date':<22} {'Duration':>8} {'Ingested':>9} "
+        f"{'Failed':>8} {'DB Size':>9} {'Disk Free':>10}"
+    )
     print(header)
     print("─" * len(header))
 
     for e in entries:
-        ts = e.get("timestamp", "?")
+        ts = e.started_utc or "?"
         try:
             dt = datetime.fromisoformat(ts).astimezone()
             ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
         except (ValueError, TypeError):
             ts_str = ts[:19]
 
-        dur = e.get("duration_seconds", 0)
-        evts = e.get("total_events", 0)
-        errs = e.get("total_errors", 0)
-        dry = "yes" if e.get("dry_run") else "no"
+        failed = e.failed_modules()
+        failed_str = ",".join(failed) if failed else "—"
+        if len(failed_str) > 8:
+            failed_str = f"{len(failed)}mod"
 
-        print(f"{ts_str:<22} {dur:>7.1f}s {evts:>7} {errs:>7} {dry:>5}")
+        db_str = f"{e.db_size_mb:.1f}MB" if e.db_size_mb < 1024 else f"{e.db_size_mb / 1024:.1f}GB"
+        disk_str = f"{e.disk_free_gb:.1f}GB"
+
+        print(
+            f"{ts_str:<22} {e.duration_sec:>7.1f}s {e.total_events_ingested:>9} "
+            f"{failed_str:>8} {db_str:>9} {disk_str:>10}"
+        )
 
     print()
 
     # Per-module breakdown from latest run
     latest = entries[-1]
-    epm = latest.get("events_per_module", {})
-    errpm = latest.get("errors_per_module", {})
-
-    if epm or errpm:
+    if latest.modules:
         print("Latest run — per module:")
-        mod_header = f"  {'Module':<20} {'Events':>7} {'Errors':>7}"
+        mod_header = f"  {'Module':<16} {'Status':<9} {'Files':>5} {'Parsed':>7} {'Ingested':>9} {'Skip':>5} {'Time':>7}"
         print(mod_header)
         print("  " + "─" * (len(mod_header) - 2))
-        for mod in sorted(set(list(epm) + list(errpm))):
-            print(f"  {mod:<20} {epm.get(mod, 0):>7} {errpm.get(mod, 0):>7}")
+        for mid in sorted(latest.modules):
+            mm = latest.modules[mid]
+            print(
+                f"  {mm.module_id:<16} {mm.status:<9} {mm.files_parsed:>5} "
+                f"{mm.events_parsed:>7} {mm.events_ingested:>9} "
+                f"{mm.events_skipped:>5} {mm.duration_sec:>6.2f}s"
+            )
         print()
 
-    # System stats from latest entry
-    db_size = latest.get("db_size_bytes", 0)
-    disk_free = latest.get("disk_free_bytes", 0)
-    print(f"DB size:    {_format_bytes(db_size)}")
-    print(f"Disk free:  {_format_bytes(disk_free)}")
+    # ── Warnings ─────────────────────────────────────────────
+    warnings: list[str] = []
 
-    # Warnings
-    if disk_free < 1_000_000_000:
-        print("\n⚠  WARNING: Less than 1 GB disk space remaining!")
-    if latest.get("total_errors", 0) > 0:
-        print(f"\n⚠  WARNING: Latest run had {latest['total_errors']} module error(s)")
+    # 1. Any module failed in the last 3 runs
+    recent = entries[-3:] if len(entries) >= 3 else entries
+    recent_failures: set[str] = set()
+    for e in recent:
+        recent_failures.update(e.failed_modules())
+    if recent_failures:
+        warnings.append(
+            f"Module failure(s) in last {len(recent)} run(s): "
+            f"{', '.join(sorted(recent_failures))}"
+        )
 
-    print()
+    # 2. DB size > 5 GB
+    if latest.db_size_mb > 5120:
+        warnings.append(
+            f"Database size is {latest.db_size_mb / 1024:.1f} GB (> 5 GB threshold)"
+        )
+
+    # 3. Disk free < 20 GB
+    if latest.disk_free_gb < 20:
+        warnings.append(
+            f"Disk free space is {latest.disk_free_gb:.1f} GB (< 20 GB threshold)"
+        )
+
+    # 4. Events ingested dropped >50% compared to 7-day average
+    if len(entries) >= 2:
+        historical = entries[:-1]  # all except latest
+        avg_events = sum(e.total_events_ingested for e in historical) / len(historical)
+        if avg_events > 0:
+            drop_pct = (avg_events - latest.total_events_ingested) / avg_events * 100
+            if drop_pct > 50:
+                warnings.append(
+                    f"Events ingested dropped {drop_pct:.0f}% vs "
+                    f"{len(historical)}-run average "
+                    f"({latest.total_events_ingested} vs avg {avg_events:.0f})"
+                )
+
+    if warnings:
+        for w in warnings:
+            print(f"  !! {w}")
+        print()
+
     return 0
 
 

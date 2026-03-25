@@ -1,5 +1,51 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Structured ETL Metrics Pipeline with --status CLI
+
+**Task:** Create `core/metrics.py` with typed dataclasses, instrument the orchestrator for per-module granular telemetry, rewrite `--status` with warning thresholds.
+
+**Prior state:** The orchestrator had an ad-hoc `_write_metrics()` that serialized a flat dict. `_print_status()` in `run_etl.py` parsed raw JSON with no typed validation, showed a basic table, and only warned on <1GB disk or errors in the latest run.
+
+**Changes made:**
+
+### New file: `core/metrics.py`
+- `ModuleMetrics` dataclass: module_id, status, files_discovered/parsed/quarantined, events_parsed/ingested/skipped, duration_sec, error
+- `ETLMetrics` dataclass: run_id (UUID), started/finished_utc, duration_sec, all totals, modules dict, db_size_mb, disk_free_gb, config_validation_warnings
+- `to_dict()` / `from_dict()` / `to_json()` / `from_json()` for serialization roundtrip
+- `write_metrics()` and `read_last_n_metrics()` for JSONL file I/O with lazy `METRICS_PATH` resolution (testable via monkeypatch)
+
+### Instrumented orchestrator (`core/orchestrator.py`)
+- Replaced `_write_metrics()` with `ETLMetrics`-based collection
+- Per-module: creates `ModuleMetrics` with timing (`time.time()` before/after), file counts (discovered from `discover_files()`, parsed after safety filter, quarantined from module), event counts (parsed from `module.parse()`, ingested/skipped from `insert_events_for_module()`)
+- Run-level: aggregates totals from per-module metrics, captures db_size_mb and disk_free_gb
+- `summary["metrics"]` now contains the full `ETLMetrics` object
+- Removed `_write_metrics()` method entirely
+
+### Rewritten `--status` CLI (`run_etl.py`)
+- Uses `read_last_n_metrics(7)` instead of raw JSON parsing
+- Table columns: Date, Duration, Ingested, Failed, DB Size, Disk Free
+- Per-module breakdown of latest run: Module, Status, Files, Parsed, Ingested, Skip, Time
+- Warning thresholds:
+  1. Module failures in last 3 runs
+  2. DB size > 5 GB
+  3. Disk free < 20 GB
+  4. Events ingested dropped >50% vs historical average
+- Removed `_read_last_n_lines()` and `_format_bytes()` (no longer needed)
+
+### Tests: `tests/test_metrics.py` (23 tests)
+
+| Class | Tests | Coverage |
+|---|---|---|
+| `TestModuleMetrics` | 3 | Defaults, to_dict roundtrip, extra keys ignored |
+| `TestETLMetrics` | 4 | Defaults, JSON roundtrip, failed_modules(), extra keys |
+| `TestWriteAndRead` | 5 | Write/read, empty file, missing file, N-limit, corrupt lines skipped |
+| `TestOrchestratorMetrics` | 4 | Summary contains ETLMetrics, per-module fields populated, failed module recorded, written to file |
+| `TestPrintStatus` | 7 | No file, table format, warning: module failures, db>5GB, disk<20GB, events drop>50%, no warnings when healthy |
+
+**Test results:** 561/561 passed in 1.85s (23 new + 538 existing).
+
+---
+
 ## 2026-03-24 — Reliability Mechanisms Audit (no changes needed)
 
 **Task:** Analyze the three reliability directives (lockfile, file stability, parser degradation) against the current codebase and determine if changes are needed.
