@@ -7,6 +7,7 @@ safe_parse_rows() so every module's parser doesn't independently
 reinvent the try/except-per-line + quarantine pattern.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -73,6 +74,15 @@ def safe_parse_rows(
                     if parsed is None:
                         # Intentional skip (e.g. non-epoch header line)
                         continue
+                    # Stamp provenance on every returned event
+                    basename = os.path.basename(filepath)
+                    events_to_stamp = parsed if isinstance(parsed, list) else [parsed]
+                    for evt in events_to_stamp:
+                        ver = evt.parser_version or "?"
+                        evt.provenance = (
+                            f"file={basename}:line={line_num}"
+                            f":parser={module_id}:v={ver}"
+                        )
                     if isinstance(parsed, list):
                         result.events.extend(parsed)
                     else:

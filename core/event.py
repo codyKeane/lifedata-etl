@@ -62,6 +62,11 @@ class Event:
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # Ephemeral provenance trace — NOT stored in the database.
+    # Set by safe_parse_rows() for debugging: which file, line, and parser
+    # produced this event.  Example:
+    #   "file=screen_2026-03-22.csv:line=47:parser=device:v=1.0.0"
+    provenance: Optional[str] = None
 
     @property
     def raw_source_id(self) -> str:
@@ -199,7 +204,8 @@ class Event:
             if self.value_numeric is not None
             else (self.value_text[:40] if self.value_text else self.value_json)
         )
+        prov = f" [{self.provenance}]" if self.provenance else ""
         return (
             f"Event({self.source_module}/{self.event_type} "
-            f"@ {self.timestamp_utc} = {val})"
+            f"@ {self.timestamp_utc} = {val}{prov})"
         )

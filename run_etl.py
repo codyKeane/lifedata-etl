@@ -9,6 +9,7 @@ Usage:
     python run_etl.py --dry-run             # Parse but don't write to DB
     python run_etl.py --dry-run --module device  # Parse device only, no writes
     python run_etl.py --status                  # Health summary (last 7 runs)
+    python run_etl.py --trace <raw_source_id>  # Trace a single event's provenance
 
 Cron (nightly at 11:55 PM):
     55 23 * * * cd ~/LifeData && venv/bin/python run_etl.py --report
@@ -68,6 +69,7 @@ def _acquire_lock():
 
 
 from core.metrics import read_last_n_metrics, ETLMetrics
+from core.database import Database
 
 
 def _print_status() -> int:
@@ -179,6 +181,132 @@ def _print_status() -> int:
     return 0
 
 
+def _print_trace(raw_source_id: str, config_path: str) -> int:
+    """Trace a single event by raw_source_id.
+
+    Prints: full event record, inferred raw file, parser version,
+    related daily_summaries, and correlations.
+    """
+    from core.config import load_config
+
+    try:
+        config = load_config(config_path)
+    except Exception as e:
+        print(f"Could not load config: {e}", file=sys.stderr)
+        return 2
+
+    db = Database(config.lifedata.db_path)
+    db.ensure_schema()
+
+    # Look up by raw_source_id (exact match or prefix)
+    row = db.conn.execute(
+        "SELECT * FROM events WHERE raw_source_id = ?",
+        (raw_source_id,),
+    ).fetchone()
+    if row is None:
+        # Try prefix match
+        row = db.conn.execute(
+            "SELECT * FROM events WHERE raw_source_id LIKE ?",
+            (raw_source_id + "%",),
+        ).fetchone()
+    if row is None:
+        print(f"No event found with raw_source_id: {raw_source_id}")
+        db.close()
+        return 1
+
+    event = dict(row)
+
+    # ── Full event record ─────────────────────────────────────
+    print()
+    print("── Event Record ──────────────────────────────────────")
+    for key in event:
+        val = event[key]
+        if val is not None:
+            print(f"  {key:<20} {val}")
+    print()
+
+    # ── Inferred raw file ─────────────────────────────────────
+    source_module = event["source_module"]
+    timestamp_local = event["timestamp_local"]
+    raw_base = os.path.expanduser(config.lifedata.raw_base)
+    date_part = timestamp_local[:10] if timestamp_local else ""
+
+    # Derive the top-level module name (e.g. "device" from "device.screen")
+    top_module = source_module.split(".")[0] if source_module else ""
+
+    print("── Inferred Source File ──────────────────────────────")
+    found_files: list[str] = []
+    if date_part and top_module:
+        # Search raw_base recursively for files containing the date
+        for dirpath, _, filenames in os.walk(raw_base):
+            for fname in filenames:
+                # Match files that belong to this module's date
+                date_compact = date_part.replace("-", "")  # 20260322
+                date_dashed = date_part  # 2026-03-22
+                # Also try M-DD-YY format used by Tasker
+                parts = date_part.split("-")
+                if len(parts) == 3:
+                    date_tasker = f"{int(parts[1])}-{int(parts[2])}-{parts[0][2:]}"
+                else:
+                    date_tasker = ""
+                if any(d in fname for d in [date_compact, date_dashed, date_tasker] if d):
+                    found_files.append(os.path.join(dirpath, fname))
+
+    if found_files:
+        for f in found_files[:5]:
+            print(f"  {f}")
+        if len(found_files) > 5:
+            print(f"  ... and {len(found_files) - 5} more")
+    else:
+        print("  (could not infer — no matching files found in raw/)")
+    print()
+
+    # ── Parser version ────────────────────────────────────────
+    print("── Parser ───────────────────────────────────────────")
+    print(f"  parser_version:    {event.get('parser_version', '?')}")
+    print(f"  source_module:     {source_module}")
+    print()
+
+    # ── Daily summaries for this date + source_module ─────────
+    print("── Related Daily Summaries ──────────────────────────")
+    summaries = db.conn.execute(
+        "SELECT * FROM daily_summaries WHERE date_local = ? AND source_module LIKE ?",
+        (date_part, top_module + ".%"),
+    ).fetchall()
+    if summaries:
+        for s in summaries:
+            sd = dict(s)
+            print(
+                f"  {sd['date_local']}  {sd['source_module']:<24} "
+                f"{sd['metric_name']:<28} = {sd.get('value_numeric', sd.get('value_json', ''))}"
+            )
+    else:
+        print("  (none)")
+    print()
+
+    # ── Correlations referencing this source_module ────────────
+    print("── Related Correlations ─────────────────────────────")
+    correlations = db.conn.execute(
+        "SELECT * FROM correlations WHERE metric_a LIKE ? OR metric_b LIKE ?",
+        (source_module + "%", source_module + "%"),
+    ).fetchall()
+    if correlations:
+        for c in correlations:
+            cd = dict(c)
+            print(
+                f"  {cd['metric_a']} <-> {cd['metric_b']}  "
+                f"r={cd.get('pearson_r', '?')}  "
+                f"rho={cd.get('spearman_rho', '?')}  "
+                f"n={cd.get('n_observations', '?')}"
+            )
+    else:
+        print("  (none)")
+    print()
+
+    db.close()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="LifeData V4 ETL Pipeline",
@@ -210,10 +338,20 @@ def main() -> int:
         action="store_true",
         help="Print health summary from last 7 ETL runs (no ETL executed)",
     )
+    parser.add_argument(
+        "--trace",
+        type=str,
+        default=None,
+        metavar="RAW_SOURCE_ID",
+        help="Trace an event by raw_source_id: show full record, source file, downstream data",
+    )
     args = parser.parse_args()
 
     if args.status:
         return _print_status()
+
+    if args.trace:
+        return _print_trace(args.trace, args.config)
 
 
     # Acquire exclusive lock — prevents overlapping cron runs

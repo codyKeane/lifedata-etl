@@ -1,5 +1,50 @@
 # CLAUDE_LOG.md — Session Log
 
+## 2026-03-24 — Event Provenance Tracing and --trace CLI
+
+**Task:** Add lightweight provenance tracing to Event model, parsers, and DB logging. Implement `--trace <raw_source_id>` CLI for debugging "why does this data point exist?"
+
+**Changes made:**
+
+### 1. Event.provenance field (`core/event.py`)
+- Added `provenance: Optional[str] = None` after `created_at`
+- Ephemeral — NOT in `to_db_tuple()` (17-field tuple unchanged), NOT in `raw_source_id` hash, NOT in `event_id`
+- Included in `__repr__` when set: `Event(device.screen/screen_on @ ... = on [file=screen.csv:line=1:parser=device:v=1.0.0])`
+- Format: `file={basename}:line={N}:parser={module_id}:v={parser_version}`
+
+### 2. Provenance stamping in safe_parse_rows (`core/parser_utils.py`)
+- After `parse_fn` returns Event(s), stamps `provenance` on each with the source filename (basename), line number, module_id, and the event's `parser_version`
+- Works for both single Event and list[Event] returns
+- Events with no `parser_version` get `v=?`
+
+### 3. Database provenance logging (`core/database.py`)
+- `insert_events_for_module`: DEBUG log per ingested event: `"Ingested {event_id[:8]} from {provenance}"`
+- Validation failures: WARNING log changed from generic `"Invalid event skipped: {errors}"` to `"Rejected event from {provenance}: {reasons}"`
+- Events without provenance log `"unknown"`
+
+### 4. --trace CLI (`run_etl.py`)
+- New `--trace <raw_source_id>` argument (also supports prefix match for convenience)
+- Prints 5 sections:
+  1. **Event Record** — all non-null fields from the events table
+  2. **Inferred Source File** — walks `raw/` for files matching the event's date (supports YYYY-MM-DD, YYYYMMDD, and Tasker M-DD-YY formats)
+  3. **Parser** — parser_version and source_module
+  4. **Related Daily Summaries** — `daily_summaries` rows for the event's date and top-level module
+  5. **Related Correlations** — `correlations` rows referencing the event's source_module
+
+### Tests: `tests/test_provenance.py` (20 tests)
+
+| Class | Tests | Coverage |
+|---|---|---|
+| `TestEventProvenance` | 7 | Default None, settable, not in db_tuple, in repr, absent when None, not in raw_source_id, not in event_id |
+| `TestSafeParseRowsProvenance` | 4 | Single event, line numbers correct, list return, no parser_version |
+| `TestDatabaseProvenanceLogging` | 3 | DEBUG on ingest, WARNING on rejection, "unknown" fallback |
+| `TestTraceCLI` | 4 | Finds event, shows daily summaries, not found returns 1, prefix match |
+| `TestDeviceParsersProvenance` | 2 | Battery parser stamps provenance, screen parser line numbers |
+
+**Test results:** 581/581 passed in 1.86s (20 new + 561 existing).
+
+---
+
 ## 2026-03-24 — Structured ETL Metrics Pipeline with --status CLI
 
 **Task:** Create `core/metrics.py` with typed dataclasses, instrument the orchestrator for per-module granular telemetry, rewrite `--status` with warning thresholds.

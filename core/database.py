@@ -243,15 +243,20 @@ class Database:
             for event in events:
                 errors = event.validate()
                 if errors:
+                    prov = event.provenance or "unknown"
                     log.warning(
-                        f"[{module_id}] Invalid event skipped: {errors} "
-                        f"(event_id={event.event_id})"
+                        f"[{module_id}] Rejected event from {prov}: "
+                        f"{'; '.join(errors)}"
                     )
                     skipped += 1
                     continue
 
                 self.conn.execute(INSERT_EVENT_SQL, event.to_db_tuple())
                 inserted += 1
+                log.debug(
+                    f"Ingested {event.event_id[:8]} from "
+                    f"{event.provenance or 'unknown'}"
+                )
 
                 # Track the date for summary recomputation
                 try:
