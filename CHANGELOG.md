@@ -2,6 +2,35 @@
 
 All notable changes to LifeData will be documented in this file.
 
+## [4.2.0] — 2026-03-26
+
+### Added — Configurability
+- **Per-metric enable/disable** — `disabled_metrics: []` config on all 11 modules. Exact match (`device.derived:screen_time_minutes`) and prefix match (`device.derived` disables all derived). Validated against metrics manifest at startup.
+- **Configurable composite weights** — `subjective_day_score_weights` (mind), `density_score_weights` (social), `cognitive_load_weights` (cognition) moved from hardcoded to config.yaml with sensible defaults.
+- **Weekly report generation** — `python run_etl.py --weekly-report` generates 7-day aggregated report to `reports/weekly/`.
+- **Monthly report generation** — `python run_etl.py --monthly-report` generates 30-day aggregated report to `reports/monthly/`.
+- **Schema migrations framework** — `schema_versions` table tracks per-module DDL versions. `apply_migrations()` runs only new versions in all-or-nothing transactions.
+- **Log rotation enforcement** — `enforce_log_rotation()` auto-deletes `.log` and `.jsonl` files older than `retention.log_rotation_days` at every ETL startup.
+
+### Added — Testing
+- 99 new tests (925 → 1024) covering: per-metric filtering, environment post-ingest (0% → 86%), media transcription (19% → 79%), deep post-ingest for oracle/world/body/social, schema migrations, log rotation.
+- `tests/core/test_module_interface.py` — is_metric_enabled() and filter_events() coverage.
+- `tests/modules/environment/test_post_ingest.py` — 16 tests for weather composite, location diversity, astro summary.
+- `tests/modules/media/test_transcribe.py` — 13 tests for Whisper transcription with mocked model.
+
+### Improved
+- Coverage: 75% → 77% overall. CI floor remains 70%.
+- All `post_ingest()` methods guard derived metric computations with `is_metric_enabled()`.
+- Orchestrator validates `disabled_metrics` names against module manifests, logs warnings for typos.
+- Parse-time filtering: disabled raw metrics are removed before database insertion.
+- E402 lint fixes in `scripts/fetch_markets.py` and `scripts/fetch_schumann.py`.
+
+### Improved — Documentation
+- `USER_GUIDE.md` — comprehensive rewrite documenting all configurability features, CLI flags, report types, pattern/hypothesis config format, data retention, and updated file structure.
+- `README.md` — updated with current test count, new CLI flags, configurability emphasis, and CONDENSED_GOALS.md reference.
+- `CONDENSED_GOALS.md` — consolidated 8 planning documents into single status tracker; superseded docs removed.
+- Planning document cleanup: removed 8 root-level analysis/planning files (COMPARISON_REPORT, EXECUTION_STRATEGY, FINAL_PLAN, GEMINI_ANALYSIS, LIFEDATA_GAP_COVERAGE, TERNARY_CLAUDE_ANALYSIS, ULTIMATE_REVIEW, CLAUDE_HEALTH_REPORT).
+
 ## [4.1.0] — 2026-03-25
 
 ### Added — New Modules
