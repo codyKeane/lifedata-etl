@@ -202,30 +202,35 @@ class OracleModule(ModuleInterface):
 
         for date_str in dates:
             # --- RNG daily deviation ---
-            rng_event = self._compute_rng_daily_deviation(db, date_str)
-            if rng_event:
-                derived_events.append(rng_event)
+            if self.is_metric_enabled("oracle.rng.derived:daily_deviation"):
+                rng_event = self._compute_rng_daily_deviation(db, date_str)
+                if rng_event:
+                    derived_events.append(rng_event)
 
             # --- Schumann daily summary ---
-            schumann_event = self._compute_schumann_daily_summary(db, date_str)
-            if schumann_event:
-                derived_events.append(schumann_event)
+            if self.is_metric_enabled("oracle.schumann.derived:daily_summary"):
+                schumann_event = self._compute_schumann_daily_summary(db, date_str)
+                if schumann_event:
+                    derived_events.append(schumann_event)
 
             # --- Activity by planet ---
-            planet_event = self._compute_activity_by_planet(db, date_str)
-            if planet_event:
-                derived_events.append(planet_event)
+            if self.is_metric_enabled("oracle.planetary_hours.derived:activity_by_planet"):
+                planet_event = self._compute_activity_by_planet(db, date_str)
+                if planet_event:
+                    derived_events.append(planet_event)
 
         # --- Hexagram frequency (rolling window, computed once) ---
         latest_date = dates[-1] if dates else None
-        freq_event = self._compute_hexagram_frequency(db, latest_date)
-        if freq_event:
-            derived_events.append(freq_event)
+        if self.is_metric_enabled("oracle.iching.derived:hexagram_frequency"):
+            freq_event = self._compute_hexagram_frequency(db, latest_date)
+            if freq_event:
+                derived_events.append(freq_event)
 
         # --- Entropy test (rolling window, computed once) ---
-        entropy_event = self._compute_entropy_test(db, latest_date)
-        if entropy_event:
-            derived_events.append(entropy_event)
+        if self.is_metric_enabled("oracle.iching.derived:entropy_test"):
+            entropy_event = self._compute_entropy_test(db, latest_date)
+            if entropy_event:
+                derived_events.append(entropy_event)
 
         # Insert derived events
         if derived_events:

@@ -110,7 +110,7 @@ class MetaModule(ModuleInterface):
         ts_utc, ts_local = parse_timestamp(fixed_ts, DEFAULT_TZ_OFFSET)
 
         # --- Completeness Check ---
-        if self._config.get("completeness_check", True):
+        if self._config.get("completeness_check", True) and self.is_metric_enabled("meta.completeness"):
             try:
                 from modules.meta.completeness import check_daily_completeness
 
@@ -146,7 +146,7 @@ class MetaModule(ModuleInterface):
                 log.error(f"Completeness check failed: {e}", exc_info=True)
 
         # --- Quality Check ---
-        if self._config.get("quality_check", True):
+        if self._config.get("quality_check", True) and self.is_metric_enabled("meta.quality"):
             try:
                 from modules.meta.quality import validate_events
 
@@ -184,7 +184,7 @@ class MetaModule(ModuleInterface):
                 log.error(f"Quality check failed: {e}", exc_info=True)
 
         # --- Storage Check ---
-        if self._config.get("storage_check", True):
+        if self._config.get("storage_check", True) and self.is_metric_enabled("meta.storage"):
             try:
                 from modules.meta.storage import storage_report
 
@@ -227,7 +227,7 @@ class MetaModule(ModuleInterface):
                 log.error(f"Storage check failed: {e}", exc_info=True)
 
         # --- Sync Lag Check ---
-        if self._config.get("sync_lag_check", True):
+        if self._config.get("sync_lag_check", True) and self.is_metric_enabled("meta.sync"):
             try:
                 from modules.meta.sync import check_sync_lag
 
@@ -259,7 +259,7 @@ class MetaModule(ModuleInterface):
                 log.error(f"Sync lag check failed: {e}", exc_info=True)
 
         # --- DB Backup Check ---
-        if self._config.get("db_backup_check", True):
+        if self._config.get("db_backup_check", True) and self.is_metric_enabled("meta.sync"):
             try:
                 from modules.meta.sync import check_db_backup_age
 
@@ -294,7 +294,7 @@ class MetaModule(ModuleInterface):
                 log.error(f"Backup check failed: {e}", exc_info=True)
 
         # --- Syncthing Relay Check ---
-        if self._config.get("syncthing_relay_check", True):
+        if self._config.get("syncthing_relay_check", True) and self.is_metric_enabled("meta.sync"):
             try:
                 from modules.meta.sync import verify_syncthing_relay
 

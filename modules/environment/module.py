@@ -172,169 +172,172 @@ class EnvironmentModule(ModuleInterface):
         day_ts = f"{day}T23:59:00+00:00"
 
         # --- Daily weather composite ---
-        hourly_rows = db.execute(
-            """
-            SELECT value_json FROM events
-            WHERE source_module = 'environment.hourly'
-              AND date(timestamp_local) = ?
-              AND value_json IS NOT NULL
-            """,
-            [day],
-        ).fetchall()
-
-        if hourly_rows:
-            temps = []
-            humidities = []
-            for (vj,) in hourly_rows:
-                try:
-                    data = json.loads(vj)
-                    if "temp_f" in data:
-                        temps.append(float(data["temp_f"]))
-                    if "humidity_pct" in data:
-                        humidities.append(float(data["humidity_pct"]))
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    continue
-
-            # Query pressure data for the day
-            pressure_rows = db.execute(
+        if self.is_metric_enabled("environment.derived:daily_weather_composite"):
+            hourly_rows = db.execute(
                 """
-                SELECT value_numeric FROM events
-                WHERE source_module = 'environment.pressure'
+                SELECT value_json FROM events
+                WHERE source_module = 'environment.hourly'
                   AND date(timestamp_local) = ?
-                  AND value_numeric IS NOT NULL
+                  AND value_json IS NOT NULL
                 """,
                 [day],
             ).fetchall()
-            pressures = [r[0] for r in pressure_rows]
 
-            if temps:
-                temp_range = round(max(temps) - min(temps), 2)
-                avg_temp = round(sum(temps) / len(temps), 2)
-                avg_humidity = (
-                    round(sum(humidities) / len(humidities), 2) if humidities else None
-                )
-                avg_pressure = (
-                    round(sum(pressures) / len(pressures), 2) if pressures else None
-                )
+            if hourly_rows:
+                temps = []
+                humidities = []
+                for (vj,) in hourly_rows:
+                    try:
+                        data = json.loads(vj)
+                        if "temp_f" in data:
+                            temps.append(float(data["temp_f"]))
+                        if "humidity_pct" in data:
+                            humidities.append(float(data["humidity_pct"]))
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        continue
 
-                composite = {
-                    "temp_range_f": temp_range,
-                    "temp_avg_f": avg_temp,
-                }
-                if avg_humidity is not None:
-                    composite["humidity_avg_pct"] = avg_humidity
-                if avg_pressure is not None:
-                    composite["pressure_avg_hpa"] = avg_pressure
+                # Query pressure data for the day
+                pressure_rows = db.execute(
+                    """
+                    SELECT value_numeric FROM events
+                    WHERE source_module = 'environment.pressure'
+                      AND date(timestamp_local) = ?
+                      AND value_numeric IS NOT NULL
+                    """,
+                    [day],
+                ).fetchall()
+                pressures = [r[0] for r in pressure_rows]
 
-                derived.append(
-                    Event(
-                        timestamp_utc=day_ts,
-                        timestamp_local=day_ts,
-                        timezone_offset="-0500",
-                        source_module="environment.derived",
-                        event_type="daily_weather_composite",
-                        value_numeric=avg_temp,
-                        value_json=safe_json(composite),
-                        confidence=0.9,
-                        parser_version=self.version,
+                if temps:
+                    temp_range = round(max(temps) - min(temps), 2)
+                    avg_temp = round(sum(temps) / len(temps), 2)
+                    avg_humidity = (
+                        round(sum(humidities) / len(humidities), 2) if humidities else None
                     )
-                )
-                log.info(
-                    f"[{day}] Weather composite: avg_temp={avg_temp}F, "
-                    f"range={temp_range}F, humidity={avg_humidity}%"
-                )
+                    avg_pressure = (
+                        round(sum(pressures) / len(pressures), 2) if pressures else None
+                    )
+
+                    composite = {
+                        "temp_range_f": temp_range,
+                        "temp_avg_f": avg_temp,
+                    }
+                    if avg_humidity is not None:
+                        composite["humidity_avg_pct"] = avg_humidity
+                    if avg_pressure is not None:
+                        composite["pressure_avg_hpa"] = avg_pressure
+
+                    derived.append(
+                        Event(
+                            timestamp_utc=day_ts,
+                            timestamp_local=day_ts,
+                            timezone_offset="-0500",
+                            source_module="environment.derived",
+                            event_type="daily_weather_composite",
+                            value_numeric=avg_temp,
+                            value_json=safe_json(composite),
+                            confidence=0.9,
+                            parser_version=self.version,
+                        )
+                    )
+                    log.info(
+                        f"[{day}] Weather composite: avg_temp={avg_temp}F, "
+                        f"range={temp_range}F, humidity={avg_humidity}%"
+                    )
 
         # --- Location diversity ---
-        location_rows = db.execute(
-            """
-            SELECT location_lat, location_lon FROM events
-            WHERE source_module = 'environment.location'
-              AND date(timestamp_local) = ?
-              AND location_lat IS NOT NULL
-              AND location_lon IS NOT NULL
-            """,
-            [day],
-        ).fetchall()
+        if self.is_metric_enabled("environment.derived:location_diversity"):
+            location_rows = db.execute(
+                """
+                SELECT location_lat, location_lon FROM events
+                WHERE source_module = 'environment.location'
+                  AND date(timestamp_local) = ?
+                  AND location_lat IS NOT NULL
+                  AND location_lon IS NOT NULL
+                """,
+                [day],
+            ).fetchall()
 
-        if location_rows:
-            unique_locs = set()
-            for lat, lon in location_rows:
-                try:
-                    rounded = (round(float(lat), 3), round(float(lon), 3))
-                    unique_locs.add(rounded)
-                except (ValueError, TypeError):
-                    continue
+            if location_rows:
+                unique_locs = set()
+                for lat, lon in location_rows:
+                    try:
+                        rounded = (round(float(lat), 3), round(float(lon), 3))
+                        unique_locs.add(rounded)
+                    except (ValueError, TypeError):
+                        continue
 
-            total_fixes = len(location_rows)
-            unique_count = len(unique_locs)
+                total_fixes = len(location_rows)
+                unique_count = len(unique_locs)
 
-            derived.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="environment.derived",
-                    event_type="location_diversity",
-                    value_numeric=float(unique_count),
-                    value_json=safe_json(
-                        {
-                            "total_fixes": total_fixes,
-                            "unique_locations": unique_count,
-                            "resolution_m": 111,
-                        }
-                    ),
-                    confidence=0.85,
-                    parser_version=self.version,
-                )
-            )
-            log.info(
-                f"[{day}] Location diversity: {unique_count} unique "
-                f"locations from {total_fixes} fixes"
-            )
-
-        # --- Astro summary ---
-        astro_rows = db.execute(
-            """
-            SELECT value_text, value_numeric FROM events
-            WHERE source_module = 'environment.astro'
-              AND date(timestamp_local) = ?
-            """,
-            [day],
-        ).fetchall()
-
-        if astro_rows:
-            moon_phase = None
-            moon_illumination = None
-            for vtext, vnum in astro_rows:
-                if vtext:
-                    moon_phase = vtext
-                if vnum is not None:
-                    moon_illumination = vnum
-
-            if moon_phase is not None or moon_illumination is not None:
                 derived.append(
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
                         timezone_offset="-0500",
                         source_module="environment.derived",
-                        event_type="astro_summary",
-                        value_numeric=moon_illumination,
-                        value_text=moon_phase,
+                        event_type="location_diversity",
+                        value_numeric=float(unique_count),
                         value_json=safe_json(
                             {
-                                "moon_phase": moon_phase,
-                                "moon_illumination_pct": moon_illumination,
+                                "total_fixes": total_fixes,
+                                "unique_locations": unique_count,
+                                "resolution_m": 111,
                             }
                         ),
-                        confidence=1.0,
+                        confidence=0.85,
                         parser_version=self.version,
                     )
                 )
                 log.info(
-                    f"[{day}] Astro summary: phase={moon_phase}, "
-                    f"illumination={moon_illumination}%"
+                    f"[{day}] Location diversity: {unique_count} unique "
+                    f"locations from {total_fixes} fixes"
                 )
+
+        # --- Astro summary ---
+        if self.is_metric_enabled("environment.derived:astro_summary"):
+            astro_rows = db.execute(
+                """
+                SELECT value_text, value_numeric FROM events
+                WHERE source_module = 'environment.astro'
+                  AND date(timestamp_local) = ?
+                """,
+                [day],
+            ).fetchall()
+
+            if astro_rows:
+                moon_phase = None
+                moon_illumination = None
+                for vtext, vnum in astro_rows:
+                    if vtext:
+                        moon_phase = vtext
+                    if vnum is not None:
+                        moon_illumination = vnum
+
+                if moon_phase is not None or moon_illumination is not None:
+                    derived.append(
+                        Event(
+                            timestamp_utc=day_ts,
+                            timestamp_local=day_ts,
+                            timezone_offset="-0500",
+                            source_module="environment.derived",
+                            event_type="astro_summary",
+                            value_numeric=moon_illumination,
+                            value_text=moon_phase,
+                            value_json=safe_json(
+                                {
+                                    "moon_phase": moon_phase,
+                                    "moon_illumination_pct": moon_illumination,
+                                }
+                            ),
+                            confidence=1.0,
+                            parser_version=self.version,
+                        )
+                    )
+                    log.info(
+                        f"[{day}] Astro summary: phase={moon_phase}, "
+                        f"illumination={moon_illumination}%"
+                    )
 
         return derived
 

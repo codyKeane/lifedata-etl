@@ -224,7 +224,7 @@ class WorldModule(ModuleInterface):
                 pass
 
         # News Sentiment Index (NSI)
-        if sentiments:
+        if self.is_metric_enabled("world.derived:news_sentiment_index") and sentiments:
             nsi = round(sum(sentiments) / len(sentiments), 4)
             derived_events.append(
                 Event(
@@ -248,7 +248,7 @@ class WorldModule(ModuleInterface):
             log.info(f"NSI: {nsi:.4f} (from {len(sentiments)} headlines)")
 
         # Information Entropy
-        if categories:
+        if self.is_metric_enabled("world.derived:information_entropy") and categories:
             cat_counts = Counter(categories)
             total = sum(cat_counts.values())
             probs = [c / total for c in cat_counts.values()]

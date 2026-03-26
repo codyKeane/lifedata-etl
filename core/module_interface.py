@@ -24,6 +24,9 @@ class ModuleInterface(ABC):
     No module imports or depends on another module.
     """
 
+    # Subclasses set self._config in __init__; declare here for type safety.
+    _config: dict[str, Any]
+
     @property
     @abstractmethod
     def module_id(self) -> str:
@@ -99,6 +102,38 @@ class ModuleInterface(ABC):
                 anomaly_eligible: bool — include in z-score detection
         """
         return {"metrics": []}
+
+    def is_metric_enabled(self, metric_name: str) -> bool:
+        """Check if a metric is enabled (not in the disabled_metrics list).
+
+        Supports both exact match ("device.battery") and prefix match
+        ("device.derived" matches "device.derived:screen_time_minutes").
+
+        Args:
+            metric_name: The metric name to check, using the same naming
+                convention as get_metrics_manifest() (e.g., "device.battery",
+                "device.derived:screen_time_minutes").
+        """
+        disabled = self._config.get("disabled_metrics", [])
+        if not disabled:
+            return True
+        for pattern in disabled:
+            if metric_name == pattern:
+                return False
+            # Allow disabling all derived metrics with "module.derived"
+            if ":" in metric_name and metric_name.split(":")[0] == pattern:
+                return False
+        return True
+
+    def filter_events(self, events: list[Event]) -> list[Event]:
+        """Remove events whose source_module matches a disabled metric.
+
+        Called by the orchestrator after parse() returns, before insertion.
+        """
+        disabled = self._config.get("disabled_metrics", [])
+        if not disabled:
+            return events
+        return [e for e in events if self.is_metric_enabled(e.source_module)]
 
     def schema_migrations(self) -> list[str]:
         """Optional: return SQL statements for module-specific tables."""

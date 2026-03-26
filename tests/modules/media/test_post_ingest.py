@@ -7,6 +7,7 @@ Covers:
 """
 
 import json
+import unittest.mock
 
 import pytest
 
@@ -169,3 +170,162 @@ class TestTranscriptionSkipped:
 
         # Should not raise — Whisper unavailability is handled gracefully
         mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+    def test_auto_transcribe_false_does_not_call_whisper(self, db):
+        """With auto_transcribe=False, transcription imports are never touched."""
+        mod = create_module(_media_config(auto_transcribe=False))
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav"),
+        ]
+        db.insert_events_for_module("media_voice", events)
+
+        with unittest.mock.patch(
+            "modules.media.transcribe.is_whisper_available"
+        ) as mock_avail:
+            mod.post_ingest(db, affected_dates={TARGET_DATE})
+            mock_avail.assert_not_called()
+
+    def test_auto_transcribe_true_whisper_unavailable_graceful(self, db):
+        """With auto_transcribe=True but whisper unavailable, skips gracefully."""
+        mod = create_module(_media_config(auto_transcribe=True))
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav"),
+        ]
+        db.insert_events_for_module("media_voice", events)
+
+        with unittest.mock.patch(
+            "modules.media.transcribe.is_whisper_available", return_value=False
+        ):
+            # Should not raise
+            mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        # Derived metrics should still be computed despite transcription skip
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 1
+        assert rows[0]["value_numeric"] == 1.0
+
+
+# ────────────────────────────────────────────────────────────
+# Additional Daily Media Count Tests
+# ────────────────────────────────────────────────────────────
+
+
+class TestDailyMediaCountExtended:
+    """Additional coverage for daily_media_count edge cases."""
+
+    def test_mixed_media_types_breakdown(self, db):
+        """Voice + photo + video → correct total and per-type breakdown."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav",
+                        minute_offset=0),
+            _make_event("media.voice", "recording", value_text="memo2.wav",
+                        minute_offset=5),
+            _make_event("media.photo", "capture", value_text="img.jpg",
+                        minute_offset=10),
+            _make_event("media.video", "capture", value_text="clip.mp4",
+                        minute_offset=15),
+            _make_event("media.video", "capture", value_text="clip2.mp4",
+                        minute_offset=20),
+            _make_event("media.video", "capture", value_text="clip3.mp4",
+                        minute_offset=25),
+        ]
+        db.insert_events_for_module("media_mixed", events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["value_numeric"] == 6.0
+
+        data = json.loads(row["value_json"])
+        assert data["media.voice"] == 2
+        assert data["media.photo"] == 1
+        assert data["media.video"] == 3
+
+    def test_single_type_only(self, db):
+        """A single photo event produces count=1 with only photo in breakdown."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.photo", "capture", value_text="solo.jpg",
+                        minute_offset=0),
+        ]
+        db.insert_events_for_module("media_photo", events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 1
+        assert rows[0]["value_numeric"] == 1.0
+
+        data = json.loads(rows[0]["value_json"])
+        assert data == {"media.photo": 1}
+
+    def test_no_media_events_no_derived(self, db):
+        """With zero media events on the day, no derived event is created."""
+        mod = create_module(_media_config())
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 0
+
+    def test_value_json_contains_all_types(self, db):
+        """value_json keys correspond exactly to the source_module values present."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.voice", "recording", value_text="v1.wav",
+                        minute_offset=0),
+            _make_event("media.photo", "capture", value_text="p1.jpg",
+                        minute_offset=10),
+        ]
+        db.insert_events_for_module("media_vp", events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 1
+        data = json.loads(rows[0]["value_json"])
+        assert set(data.keys()) == {"media.voice", "media.photo"}
+
+
+# ────────────────────────────────────────────────────────────
+# Disabled Metrics
+# ────────────────────────────────────────────────────────────
+
+
+class TestMediaDisabledMetrics:
+    """Verify disabled_metrics prevents media derived metric computation."""
+
+    def test_disable_daily_media_count_skips(self, db):
+        """Disabling media.derived:daily_media_count produces no event."""
+        cfg = {
+            "enabled": True,
+            "auto_transcribe": False,
+            "disabled_metrics": ["media.derived:daily_media_count"],
+        }
+        mod = create_module(cfg)
+
+        events = [
+            _make_event("media.photo", "capture", value_text="photo.jpg",
+                        minute_offset=0),
+            _make_event("media.voice", "recording", value_text="memo.wav",
+                        minute_offset=10),
+        ]
+        db.insert_events_for_module("media_disabled", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 0

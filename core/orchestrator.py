@@ -28,6 +28,28 @@ log = get_logger("lifedata.orchestrator")
 ALLOWED_EXTENSIONS = {".csv", ".json"}
 
 
+def enforce_log_rotation(log_dir: str, max_age_days: int) -> None:
+    """Delete *.log and *.jsonl files older than max_age_days in log_dir.
+
+    Best-effort: logs a warning on failure but never raises.
+    """
+    try:
+        log_path = Path(log_dir)
+        if not log_path.is_dir():
+            return
+        cutoff = time.time() - (max_age_days * 86400)
+        for pattern in ("*.log", "*.jsonl"):
+            for f in log_path.glob(pattern):
+                try:
+                    if os.path.getmtime(f) < cutoff:
+                        f.unlink()
+                        log.info(f"Log rotation: deleted {f}")
+                except OSError as e:
+                    log.warning(f"Log rotation: failed to remove {f}: {e}")
+    except Exception as e:
+        log.warning(f"Log rotation failed: {e}")
+
+
 class Orchestrator:
     """Main ETL execution engine."""
 
@@ -48,6 +70,12 @@ class Orchestrator:
 
         self.db = Database(self.config.lifedata.db_path)
         self.modules: list[ModuleInterface] = []
+
+        # Enforce log rotation based on retention config
+        enforce_log_rotation(
+            str(Path(self.config.lifedata.log_path).parent),
+            self.config.lifedata.retention.log_rotation_days,
+        )
 
     def _check_startup_security(self, config_path: str) -> list[str]:
         """Run security posture checks at startup. Returns list of warnings.
@@ -239,6 +267,27 @@ class Orchestrator:
 
                 self.modules.append(instance)
                 log.info(f"Loaded module: {instance.module_id} v{instance.version}")
+
+                # Validate disabled_metrics against the module's manifest
+                disabled = module_config.get("disabled_metrics", [])
+                if disabled:
+                    manifest_names = {
+                        m["name"]
+                        for m in instance.get_metrics_manifest().get("metrics", [])
+                    }
+                    # Also accept base names (e.g. "device.derived") for prefix matching
+                    base_names = {n.split(":")[0] for n in manifest_names if ":" in n}
+                    valid_names = manifest_names | base_names
+                    for name in disabled:
+                        if name not in valid_names:
+                            log.warning(
+                                f"[{module_name}] disabled_metrics: '{name}' not found "
+                                f"in metrics manifest — check spelling"
+                            )
+                    log.info(
+                        f"[{module_name}] {len(disabled)} metric(s) disabled: "
+                        f"{', '.join(disabled)}"
+                    )
             except Exception as e:
                 log.error(f"Failed to load module '{module_name}': {e}", exc_info=True)
 
@@ -357,6 +406,17 @@ class Orchestrator:
                         log.warning(f"[{module.module_id}] Failed to parse {f}: {e}")
 
                 mm.events_parsed = len(events)
+
+                # Filter out disabled metrics before insertion
+                pre_filter = len(events)
+                events = module.filter_events(events)
+                filtered_count = pre_filter - len(events)
+                if filtered_count:
+                    log.info(
+                        f"[{module.module_id}] Filtered {filtered_count} events "
+                        f"(disabled metrics)"
+                    )
+
                 log.info(f"[{module.module_id}] Parsed {len(events)} events")
 
                 # Insert (SAVEPOINT-wrapped per module)

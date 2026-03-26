@@ -237,3 +237,72 @@ class TestChargingDuration:
         rows = db.query_events(source_module="device.derived",
                                event_type="charging_duration")
         assert len(rows) == 0
+
+
+# ────────────────────────────────────────────────────────────
+# Disabled Metrics
+# ────────────────────────────────────────────────────────────
+
+
+class TestDisabledMetrics:
+    """Verify disabled_metrics config prevents derived metric computation."""
+
+    def test_disable_screen_time_skips_computation(self, db):
+        """Disabling screen_time_minutes produces no screen time event."""
+        cfg = {"enabled": True, "disabled_metrics": ["device.derived:screen_time_minutes"]}
+        mod = create_module(cfg)
+
+        events = [
+            _make_event("device.screen", "screen_on", value_text="on",
+                        minute_offset=i * 5)
+            for i in range(3)
+        ]
+        db.insert_events_for_module("device_screen", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="device.derived",
+                               event_type="screen_time_minutes")
+        assert len(rows) == 0
+
+        # Other derived metrics should still compute
+        unlock_rows = db.query_events(source_module="device.derived",
+                                      event_type="unlock_count")
+        assert len(unlock_rows) == 1
+
+    def test_disable_all_derived_via_prefix(self, db):
+        """Disabling 'device.derived' skips all derived metrics."""
+        cfg = {"enabled": True, "disabled_metrics": ["device.derived"]}
+        mod = create_module(cfg)
+
+        events = [
+            _make_event("device.screen", "screen_on", value_text="on",
+                        minute_offset=i * 5)
+            for i in range(3)
+        ]
+        events.append(
+            _make_event("device.battery", "pulse", value_numeric=90.0,
+                        minute_offset=0),
+        )
+        db.insert_events_for_module("device_all", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        # No derived events should exist
+        all_derived = db.query_events(source_module="device.derived")
+        assert len(all_derived) == 0
+
+    def test_empty_disabled_metrics_computes_all(self, db):
+        """Empty disabled_metrics list computes everything (backward compat)."""
+        cfg = {"enabled": True, "disabled_metrics": []}
+        mod = create_module(cfg)
+
+        events = [
+            _make_event("device.screen", "screen_on", value_text="on",
+                        minute_offset=i * 5)
+            for i in range(3)
+        ]
+        db.insert_events_for_module("device_screen", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="device.derived",
+                               event_type="unlock_count")
+        assert len(rows) == 1

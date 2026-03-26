@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from scripts._http import retry_get
+from scripts._http import retry_get  # noqa: E402
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
 

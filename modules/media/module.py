@@ -178,40 +178,41 @@ class MediaModule(ModuleInterface):
 
         # Compute daily media frequency metrics
         all_derived: list[Event] = []
-        for process_day in days_to_process:
-            # Deterministic timestamp for derived daily metrics (idempotent hashing)
-            day_ts = f"{process_day}T23:59:00+00:00"
+        if self.is_metric_enabled("media.derived:daily_media_count"):
+            for process_day in days_to_process:
+                # Deterministic timestamp for derived daily metrics (idempotent hashing)
+                day_ts = f"{process_day}T23:59:00+00:00"
 
-            rows = db.execute(
-                """
-                SELECT source_module, COUNT(*) as cnt
-                FROM events
-                WHERE source_module LIKE 'media.%'
-                  AND source_module != 'media.derived'
-                  AND date(timestamp_utc) = ?
-                GROUP BY source_module
-                """,
-                (process_day,),
-            )
-            result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
-            media_counts = {}
-            for row in result_set:
-                media_counts[row[0]] = row[1]
+                rows = db.execute(
+                    """
+                    SELECT source_module, COUNT(*) as cnt
+                    FROM events
+                    WHERE source_module LIKE 'media.%'
+                      AND source_module != 'media.derived'
+                      AND date(timestamp_utc) = ?
+                    GROUP BY source_module
+                    """,
+                    (process_day,),
+                )
+                result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
+                media_counts = {}
+                for row in result_set:
+                    media_counts[row[0]] = row[1]
 
-            total = sum(media_counts.values())
-            if total > 0:
-                all_derived.append(Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="media.derived",
-                    event_type="daily_media_count",
-                    value_numeric=float(total),
-                    value_json=safe_json(media_counts),
-                    confidence=1.0,
-                    parser_version=self.version,
-                ))
-                log.info(f"Media {process_day}: {total} items ({media_counts})")
+                total = sum(media_counts.values())
+                if total > 0:
+                    all_derived.append(Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="media.derived",
+                        event_type="daily_media_count",
+                        value_numeric=float(total),
+                        value_json=safe_json(media_counts),
+                        confidence=1.0,
+                        parser_version=self.version,
+                    ))
+                    log.info(f"Media {process_day}: {total} items ({media_counts})")
 
         if all_derived:
             inserted, skipped = db.insert_events_for_module("media", all_derived)

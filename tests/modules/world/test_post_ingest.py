@@ -128,6 +128,57 @@ class TestNewsSentimentIndex:
         rows = _query_derived(db, "news_sentiment_index")
         assert len(rows) == 0
 
+    def test_all_same_sentiment(self, db):
+        """All headlines with the same sentiment produce that value as average."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T{10 + i}:00:00+00:00",
+                value_numeric=0.75,
+                value_json=json.dumps({"category": "technology"}),
+            )
+            for i in range(4)
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "news_sentiment_index")
+        assert len(rows) == 1
+        assert rows[0][0] == pytest.approx(0.75, abs=0.001)
+
+    def test_value_json_contains_min_max(self, db):
+        """Verify value_json contains sample_size, min, and max fields."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=-0.8,
+                value_json=json.dumps({"category": "politics"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.9,
+                value_json=json.dumps({"category": "technology"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "news_sentiment_index")
+        assert len(rows) == 1
+        meta = json.loads(rows[0][1])
+        assert meta["sample_size"] == 2
+        assert meta["min"] == pytest.approx(-0.8, abs=0.001)
+        assert meta["max"] == pytest.approx(0.9, abs=0.001)
+
 
 # ──────────────────────────────────────────────────────────────
 # TestInformationEntropy
@@ -220,3 +271,101 @@ class TestInformationEntropy:
 
         rows = _query_derived(db, "information_entropy")
         assert len(rows) == 0
+
+    def test_uniform_distribution_maximum_entropy(self, db):
+        """N equally distributed categories yield log2(N) entropy."""
+        categories = ["tech", "science", "politics", "health", "sports", "business", "entertainment", "world"]
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T{10 + i}:00:00+00:00",
+                value_numeric=0.1 * i,
+                value_json=json.dumps({"category": cat}),
+            )
+            for i, cat in enumerate(categories)
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "information_entropy")
+        assert len(rows) == 1
+
+        # 8 categories, uniform -> entropy = log2(8) = 3.0
+        expected = math.log2(len(categories))
+        assert rows[0][0] == pytest.approx(expected, abs=0.001)
+
+        meta = json.loads(rows[0][1])
+        assert meta["num_categories"] == 8
+
+    def test_skewed_distribution_lower_entropy(self, db):
+        """A skewed distribution has lower entropy than uniform."""
+        # 5 tech, 1 science, 1 politics, 1 health -> skewed toward tech
+        cats = ["technology"] * 5 + ["science", "politics", "health"]
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T{10 + i}:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": cat}),
+            )
+            for i, cat in enumerate(cats)
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "information_entropy")
+        assert len(rows) == 1
+
+        # Max entropy for 4 categories = log2(4) = 2.0
+        # Skewed distribution should be less than that
+        max_entropy = math.log2(4)
+        assert rows[0][0] < max_entropy
+        assert rows[0][0] > 0.0
+
+        meta = json.loads(rows[0][1])
+        assert meta["num_categories"] == 4
+        cat_counts = meta["category_counts"]
+        assert cat_counts["technology"] == 5
+
+    def test_category_counts_in_value_json(self, db):
+        """Verify category_counts and num_categories in value_json."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.3,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.rss",
+                "article",
+                timestamp_utc=f"{DATE}T12:00:00+00:00",
+                value_numeric=-0.2,
+                value_json=json.dumps({"category": "sports"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "information_entropy")
+        assert len(rows) == 1
+        meta = json.loads(rows[0][1])
+        assert meta["num_categories"] == 2
+        assert meta["category_counts"]["tech"] == 2
+        assert meta["category_counts"]["sports"] == 1

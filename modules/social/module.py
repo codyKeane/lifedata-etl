@@ -199,130 +199,135 @@ class SocialModule(ModuleInterface):
         sms_count = counts.get("social.sms", 0)
         notif_count = counts.get("social.notification", 0)
 
-        if call_count + sms_count + notif_count > 0:
-            density = round(call_count * 3.0 + sms_count * 2.0 + notif_count * 0.1, 1)
-            derived.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="social.derived",
-                    event_type="density_score",
-                    value_numeric=density,
-                    value_json=safe_json(
-                        {
-                            "calls": call_count,
-                            "sms": sms_count,
-                            "notifications": notif_count,
-                            "weights": {"call": 3.0, "sms": 2.0, "notification": 0.1},
-                        }
-                    ),
-                    confidence=0.9,
-                    parser_version=self.version,
+        if self.is_metric_enabled("social.derived:density_score"):
+            if call_count + sms_count + notif_count > 0:
+                weights = self._config.get("density_score_weights", {
+                    "call": 3.0, "sms": 2.0, "notification": 0.1,
+                })
+                density = round(call_count * weights["call"] + sms_count * weights["sms"] + notif_count * weights["notification"], 1)
+                derived.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="social.derived",
+                        event_type="density_score",
+                        value_numeric=density,
+                        value_json=safe_json(
+                            {
+                                "calls": call_count,
+                                "sms": sms_count,
+                                "notifications": notif_count,
+                                "weights": dict(weights),
+                            }
+                        ),
+                        confidence=0.9,
+                        parser_version=self.version,
+                    )
                 )
-            )
-            log.info(
-                f"[{day}] Density score: {density} "
-                f"(calls={call_count}, sms={sms_count}, notif={notif_count})"
-            )
+                log.info(
+                    f"[{day}] Density score: {density} "
+                    f"(calls={call_count}, sms={sms_count}, notif={notif_count})"
+                )
 
         # --- Digital hygiene ---
         # Ratio of productive app usage to total app usage.
         # Productive apps: known work/utility apps. Distraction: social media, games.
-        app_rows = db.execute(
-            """
-            SELECT value_text FROM events
-            WHERE source_module = 'social.app_usage'
-              AND event_type = 'foreground'
-              AND date(timestamp_local) = ?
-              AND value_text IS NOT NULL
-            """,
-            [day],
-        ).fetchall()
+        if self.is_metric_enabled("social.derived:digital_hygiene"):
+            app_rows = db.execute(
+                """
+                SELECT value_text FROM events
+                WHERE source_module = 'social.app_usage'
+                  AND event_type = 'foreground'
+                  AND date(timestamp_local) = ?
+                  AND value_text IS NOT NULL
+                """,
+                [day],
+            ).fetchall()
 
-        if app_rows:
-            # Classify apps into productive vs distraction
-            productive_keywords = {
-                "terminal",
-                "code",
-                "editor",
-                "file",
-                "calendar",
-                "email",
-                "mail",
-                "clock",
-                "calculator",
-                "notes",
-                "settings",
-                "dialer",
-                "contacts",
-                "maps",
-                "camera",
-                "syncthing",
-                "tasker",
-                "launcher",
-                "keyboard",
-            }
-            distraction_keywords = {
-                "reddit",
-                "twitter",
-                "instagram",
-                "tiktok",
-                "facebook",
-                "youtube",
-                "netflix",
-                "game",
-                "twitch",
-                "snapchat",
-                "discord",
-            }
+            if app_rows:
+                # Classify apps into productive vs distraction
+                productive_keywords = {
+                    "terminal",
+                    "code",
+                    "editor",
+                    "file",
+                    "calendar",
+                    "email",
+                    "mail",
+                    "clock",
+                    "calculator",
+                    "notes",
+                    "settings",
+                    "dialer",
+                    "contacts",
+                    "maps",
+                    "camera",
+                    "syncthing",
+                    "tasker",
+                    "launcher",
+                    "keyboard",
+                }
+                distraction_keywords = {
+                    "reddit",
+                    "twitter",
+                    "instagram",
+                    "tiktok",
+                    "facebook",
+                    "youtube",
+                    "netflix",
+                    "game",
+                    "twitch",
+                    "snapchat",
+                    "discord",
+                }
 
-            productive = 0
-            distraction = 0
-            neutral = 0
+                productive = 0
+                distraction = 0
+                neutral = 0
 
-            for (app_name,) in app_rows:
-                name_lower = app_name.lower() if app_name else ""
-                if any(kw in name_lower for kw in productive_keywords):
-                    productive += 1
-                elif any(kw in name_lower for kw in distraction_keywords):
-                    distraction += 1
-                else:
-                    neutral += 1
+                for (app_name,) in app_rows:
+                    name_lower = app_name.lower() if app_name else ""
+                    if any(kw in name_lower for kw in productive_keywords):
+                        productive += 1
+                    elif any(kw in name_lower for kw in distraction_keywords):
+                        distraction += 1
+                    else:
+                        neutral += 1
 
-            total_apps = productive + distraction + neutral
-            hygiene_ratio = (
-                round(productive / total_apps * 100, 1) if total_apps > 0 else 0.0
-            )
-
-            derived.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="social.derived",
-                    event_type="digital_hygiene",
-                    value_numeric=hygiene_ratio,
-                    value_json=safe_json(
-                        {
-                            "productive": productive,
-                            "distraction": distraction,
-                            "neutral": neutral,
-                            "total_app_switches": total_apps,
-                            "unit": "productive_pct",
-                        }
-                    ),
-                    confidence=0.75,
-                    parser_version=self.version,
+                total_apps = productive + distraction + neutral
+                hygiene_ratio = (
+                    round(productive / total_apps * 100, 1) if total_apps > 0 else 0.0
                 )
-            )
-            log.info(
-                f"[{day}] Digital hygiene: {hygiene_ratio}% productive "
-                f"({productive}/{total_apps})"
-            )
+
+                derived.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="social.derived",
+                        event_type="digital_hygiene",
+                        value_numeric=hygiene_ratio,
+                        value_json=safe_json(
+                            {
+                                "productive": productive,
+                                "distraction": distraction,
+                                "neutral": neutral,
+                                "total_app_switches": total_apps,
+                                "unit": "productive_pct",
+                            }
+                        ),
+                        confidence=0.75,
+                        parser_version=self.version,
+                    )
+                )
+                log.info(
+                    f"[{day}] Digital hygiene: {hygiene_ratio}% productive "
+                    f"({productive}/{total_apps})"
+                )
 
         # --- Notification load (per active hour) ---
-        if notif_count > 0:
+        if self.is_metric_enabled("social.derived:notification_load") and notif_count > 0:
             # Estimate active hours from first to last notification
             notif_times = db.execute(
                 """

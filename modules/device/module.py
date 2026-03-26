@@ -200,86 +200,88 @@ class DeviceModule(ModuleInterface):
         day_ts = f"{day}T23:59:00+00:00"
 
         # --- Unlock count ---
-        row = db.execute(
-            """
-            SELECT COUNT(*) FROM events
-            WHERE source_module = 'device.screen'
-              AND event_type = 'screen_on'
-              AND date(timestamp_local) = ?
-            """,
-            [day],
-        ).fetchone()
-        unlock_count = row[0] if row else 0
-        if unlock_count > 0:
-            derived.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="device.derived",
-                    event_type="unlock_count",
-                    value_numeric=float(unlock_count),
-                    confidence=1.0,
-                    parser_version=self.version,
+        if self.is_metric_enabled("device.derived:unlock_count"):
+            row = db.execute(
+                """
+                SELECT COUNT(*) FROM events
+                WHERE source_module = 'device.screen'
+                  AND event_type = 'screen_on'
+                  AND date(timestamp_local) = ?
+                """,
+                [day],
+            ).fetchone()
+            unlock_count = row[0] if row else 0
+            if unlock_count > 0:
+                derived.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="device.derived",
+                        event_type="unlock_count",
+                        value_numeric=float(unlock_count),
+                        confidence=1.0,
+                        parser_version=self.version,
+                    )
                 )
-            )
-            log.info(f"[{day}] Unlock count: {unlock_count}")
+                log.info(f"[{day}] Unlock count: {unlock_count}")
 
         # --- Screen time estimate ---
         # Estimate from gaps between consecutive screen_on events,
         # capped at 10 min per session (no screen_off data available).
-        screen_rows = db.execute(
-            """
-            SELECT timestamp_utc FROM events
-            WHERE source_module = 'device.screen'
-              AND event_type = 'screen_on'
-              AND date(timestamp_local) = ?
-            ORDER BY timestamp_utc
-            """,
-            [day],
-        ).fetchall()
+        if self.is_metric_enabled("device.derived:screen_time_minutes"):
+            screen_rows = db.execute(
+                """
+                SELECT timestamp_utc FROM events
+                WHERE source_module = 'device.screen'
+                  AND event_type = 'screen_on'
+                  AND date(timestamp_local) = ?
+                ORDER BY timestamp_utc
+                """,
+                [day],
+            ).fetchall()
 
-        if len(screen_rows) >= 2:
-            total_screen_min = 0.0
-            max_session_min = 10.0
-            for i in range(len(screen_rows) - 1):
-                try:
-                    t1 = datetime.fromisoformat(screen_rows[i][0])
-                    t2 = datetime.fromisoformat(screen_rows[i + 1][0])
-                    if t1.tzinfo is None:
-                        t1 = t1.replace(tzinfo=UTC)
-                    if t2.tzinfo is None:
-                        t2 = t2.replace(tzinfo=UTC)
-                    gap_min = (t2 - t1).total_seconds() / 60
-                    total_screen_min += min(gap_min, max_session_min)
-                except (ValueError, TypeError):
-                    continue
-            avg_session = total_screen_min / (len(screen_rows) - 1)
-            total_screen_min += min(avg_session, max_session_min)
-            total_screen_min = round(total_screen_min, 1)
+            if len(screen_rows) >= 2:
+                total_screen_min = 0.0
+                max_session_min = 10.0
+                for i in range(len(screen_rows) - 1):
+                    try:
+                        t1 = datetime.fromisoformat(screen_rows[i][0])
+                        t2 = datetime.fromisoformat(screen_rows[i + 1][0])
+                        if t1.tzinfo is None:
+                            t1 = t1.replace(tzinfo=UTC)
+                        if t2.tzinfo is None:
+                            t2 = t2.replace(tzinfo=UTC)
+                        gap_min = (t2 - t1).total_seconds() / 60
+                        total_screen_min += min(gap_min, max_session_min)
+                    except (ValueError, TypeError):
+                        continue
+                avg_session = total_screen_min / (len(screen_rows) - 1)
+                total_screen_min += min(avg_session, max_session_min)
+                total_screen_min = round(total_screen_min, 1)
 
-            derived.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="device.derived",
-                    event_type="screen_time_minutes",
-                    value_numeric=total_screen_min,
-                    value_json=safe_json(
-                        {
-                            "sessions": len(screen_rows),
-                            "max_session_cap_min": max_session_min,
-                            "method": "inter_unlock_gap_capped",
-                        }
-                    ),
-                    confidence=0.7,
-                    parser_version=self.version,
+                derived.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="device.derived",
+                        event_type="screen_time_minutes",
+                        value_numeric=total_screen_min,
+                        value_json=safe_json(
+                            {
+                                "sessions": len(screen_rows),
+                                "max_session_cap_min": max_session_min,
+                                "method": "inter_unlock_gap_capped",
+                            }
+                        ),
+                        confidence=0.7,
+                        parser_version=self.version,
+                    )
                 )
-            )
-            log.info(
-                f"[{day}] Screen time: {total_screen_min} min ({len(screen_rows)} sessions)"
-            )
+                log.info(
+                    f"[{day}] Screen time: {total_screen_min} min ({len(screen_rows)} sessions)"
+                )
 
         # --- Charging duration ---
         charge_rows = db.execute(
@@ -294,7 +296,7 @@ class DeviceModule(ModuleInterface):
             [day],
         ).fetchall()
 
-        if charge_rows:
+        if self.is_metric_enabled("device.derived:charging_duration") and charge_rows:
             total_charge_min = 0.0
             total_pct_gained = 0.0
             charge_sessions = 0
@@ -351,76 +353,77 @@ class DeviceModule(ModuleInterface):
                 )
 
         # --- Battery drain rate ---
-        batt_rows = db.execute(
-            """
-            SELECT timestamp_utc, value_numeric FROM events
-            WHERE source_module = 'device.battery'
-              AND event_type = 'pulse'
-              AND date(timestamp_local) = ?
-              AND value_numeric IS NOT NULL
-            ORDER BY timestamp_utc
-            """,
-            [day],
-        ).fetchall()
+        if self.is_metric_enabled("device.derived:battery_drain_rate"):
+            batt_rows = db.execute(
+                """
+                SELECT timestamp_utc, value_numeric FROM events
+                WHERE source_module = 'device.battery'
+                  AND event_type = 'pulse'
+                  AND date(timestamp_local) = ?
+                  AND value_numeric IS NOT NULL
+                ORDER BY timestamp_utc
+                """,
+                [day],
+            ).fetchall()
 
-        if len(batt_rows) >= 2:
-            # Build charging intervals to exclude
-            charge_intervals: list[tuple[str, str]] = []
-            last_cs: str | None = None
-            for etype, ts, _pct in charge_rows if charge_rows else []:
-                if etype == "charge_start":
-                    last_cs = ts
-                elif etype == "charge_stop" and last_cs:
-                    charge_intervals.append((last_cs, ts))
-                    last_cs = None
+            if len(batt_rows) >= 2:
+                # Build charging intervals to exclude
+                charge_intervals: list[tuple[str, str]] = []
+                last_cs: str | None = None
+                for etype, ts, _pct in charge_rows if charge_rows else []:
+                    if etype == "charge_start":
+                        last_cs = ts
+                    elif etype == "charge_stop" and last_cs:
+                        charge_intervals.append((last_cs, ts))
+                        last_cs = None
 
-            def _is_during_charging(ts_str: str) -> bool:
-                return any(cs_start <= ts_str <= cs_end for cs_start, cs_end in charge_intervals)
+                def _is_during_charging(ts_str: str) -> bool:
+                    return any(cs_start <= ts_str <= cs_end for cs_start, cs_end in charge_intervals)
 
-            drain_segments: list[float] = []
-            for i in range(len(batt_rows) - 1):
-                ts1, pct1 = batt_rows[i][0], batt_rows[i][1]
-                ts2, pct2 = batt_rows[i + 1][0], batt_rows[i + 1][1]
-                if _is_during_charging(ts1) or _is_during_charging(ts2):
-                    continue
-                try:
-                    dt1 = datetime.fromisoformat(ts1)
-                    dt2 = datetime.fromisoformat(ts2)
-                    if dt1.tzinfo is None:
-                        dt1 = dt1.replace(tzinfo=UTC)
-                    if dt2.tzinfo is None:
-                        dt2 = dt2.replace(tzinfo=UTC)
-                    hours = (dt2 - dt1).total_seconds() / 3600
-                    if hours > 0 and pct2 < pct1:
-                        drain_segments.append((pct1 - pct2) / hours)
-                except (ValueError, TypeError):
-                    continue
+                drain_segments: list[float] = []
+                for i in range(len(batt_rows) - 1):
+                    ts1, pct1 = batt_rows[i][0], batt_rows[i][1]
+                    ts2, pct2 = batt_rows[i + 1][0], batt_rows[i + 1][1]
+                    if _is_during_charging(ts1) or _is_during_charging(ts2):
+                        continue
+                    try:
+                        dt1 = datetime.fromisoformat(ts1)
+                        dt2 = datetime.fromisoformat(ts2)
+                        if dt1.tzinfo is None:
+                            dt1 = dt1.replace(tzinfo=UTC)
+                        if dt2.tzinfo is None:
+                            dt2 = dt2.replace(tzinfo=UTC)
+                        hours = (dt2 - dt1).total_seconds() / 3600
+                        if hours > 0 and pct2 < pct1:
+                            drain_segments.append((pct1 - pct2) / hours)
+                    except (ValueError, TypeError):
+                        continue
 
-            if drain_segments:
-                avg_drain = round(sum(drain_segments) / len(drain_segments), 2)
-                derived.append(
-                    Event(
-                        timestamp_utc=day_ts,
-                        timestamp_local=day_ts,
-                        timezone_offset="-0500",
-                        source_module="device.derived",
-                        event_type="battery_drain_rate",
-                        value_numeric=avg_drain,
-                        value_json=safe_json(
-                            {
-                                "unit": "pct_per_hour",
-                                "segments_analyzed": len(drain_segments),
-                                "total_pulses": len(batt_rows),
-                            }
-                        ),
-                        confidence=0.85,
-                        parser_version=self.version,
+                if drain_segments:
+                    avg_drain = round(sum(drain_segments) / len(drain_segments), 2)
+                    derived.append(
+                        Event(
+                            timestamp_utc=day_ts,
+                            timestamp_local=day_ts,
+                            timezone_offset="-0500",
+                            source_module="device.derived",
+                            event_type="battery_drain_rate",
+                            value_numeric=avg_drain,
+                            value_json=safe_json(
+                                {
+                                    "unit": "pct_per_hour",
+                                    "segments_analyzed": len(drain_segments),
+                                    "total_pulses": len(batt_rows),
+                                }
+                            ),
+                            confidence=0.85,
+                            parser_version=self.version,
+                        )
                     )
-                )
-                log.info(
-                    f"[{day}] Battery drain: {avg_drain}%/hr "
-                    f"({len(drain_segments)} segments)"
-                )
+                    log.info(
+                        f"[{day}] Battery drain: {avg_drain}%/hr "
+                        f"({len(drain_segments)} segments)"
+                    )
 
         return derived
 

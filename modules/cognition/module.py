@@ -199,36 +199,41 @@ class CognitionModule(ModuleInterface):
 
         for date_str in dates:
             # --- Daily RT baseline ---
-            rt_events = self._get_daily_rt_baseline(db, date_str, baseline_days)
-            if rt_events:
-                derived_events.extend(rt_events)
+            if self.is_metric_enabled("cognition.reaction.derived:daily_baseline"):
+                rt_events = self._get_daily_rt_baseline(db, date_str, baseline_days)
+                if rt_events:
+                    derived_events.extend(rt_events)
 
             # --- Cognitive load index ---
-            cli_event = self._compute_cognitive_load_index(db, date_str, baseline_days)
-            if cli_event:
-                derived_events.append(cli_event)
+            if self.is_metric_enabled("cognition.derived:cognitive_load_index"):
+                cli_event = self._compute_cognitive_load_index(db, date_str, baseline_days)
+                if cli_event:
+                    derived_events.append(cli_event)
 
-                # --- Impairment flag (depends on CLI) ---
-                imp_event = self._compute_impairment_flag(
-                    db,
-                    date_str,
-                    cli_event.value_numeric if cli_event.value_numeric is not None else 0.0,
-                    baseline_days,
-                    impairment_threshold,
-                )
-                if imp_event:
-                    derived_events.append(imp_event)
+                    # --- Impairment flag (depends on CLI) ---
+                    if self.is_metric_enabled("cognition.derived:impairment_flag"):
+                        imp_event = self._compute_impairment_flag(
+                            db,
+                            date_str,
+                            cli_event.value_numeric if cli_event.value_numeric is not None else 0.0,
+                            baseline_days,
+                            impairment_threshold,
+                        )
+                        if imp_event:
+                            derived_events.append(imp_event)
 
             # --- Subjective-objective gap ---
-            gap_event = self._compute_subjective_objective_gap(db, date_str)
-            if gap_event:
-                derived_events.append(gap_event)
+            if self.is_metric_enabled("cognition.derived:subjective_objective_gap"):
+                gap_event = self._compute_subjective_objective_gap(db, date_str)
+                if gap_event:
+                    derived_events.append(gap_event)
 
         # --- Peak cognition hour (rolling 14-day, computed once) ---
-        ref_date = dates[-1] if dates else None
-        peak_event = self._compute_peak_cognition_hour(db, baseline_days, ref_date)
-        if peak_event:
-            derived_events.append(peak_event)
+        if self.is_metric_enabled("cognition.derived:peak_cognition_hour"):
+            ref_date = dates[-1] if dates else None
+            peak_event = self._compute_peak_cognition_hour(db, baseline_days, ref_date)
+            if peak_event:
+                derived_events.append(peak_event)
 
         # Insert derived events
         if derived_events:
@@ -358,7 +363,9 @@ class CognitionModule(ModuleInterface):
         if len(components) < 1:
             return None
 
-        weights = {"rt": 0.3, "memory": 0.3, "time": 0.2, "typing": 0.2}
+        weights = self._config.get("cognitive_load_weights", {
+            "rt": 0.3, "memory": 0.3, "time": 0.2, "typing": 0.2,
+        })
         total_weight = sum(weights.get(k, 0.2) for k in components)
         cli = (
             sum(components[k] * weights.get(k, 0.2) for k in components) / total_weight

@@ -34,7 +34,7 @@ except ImportError:
     print("requests not installed — cannot fetch Schumann data.")
     sys.exit(0)
 
-from scripts._http import retry_get
+from scripts._http import retry_get  # noqa: E402
 
 SOURCES = [
     {

@@ -242,62 +242,73 @@ class BehaviorModule(ModuleInterface):
             day_ts = f"{date_str}T23:59:00+00:00"
 
             # --- App switch hourly rates ---
-            hourly_events = self._compute_hourly_rates(db, date_str, day_ts)
-            derived_events.extend(hourly_events)
+            if self.is_metric_enabled("behavior.app_switch:hourly_rate"):
+                hourly_events = self._compute_hourly_rates(db, date_str, day_ts)
+                derived_events.extend(hourly_events)
 
             # --- Fragmentation index ---
-            frag_event = self._compute_fragmentation_index(db, date_str, day_ts)
-            if frag_event:
-                derived_events.append(frag_event)
+            if self.is_metric_enabled("behavior.app_switch.derived:fragmentation_index"):
+                frag_event = self._compute_fragmentation_index(db, date_str, day_ts)
+                if frag_event:
+                    derived_events.append(frag_event)
 
             # --- Steps daily total ---
-            steps_event = self._compute_daily_steps(db, date_str, day_ts)
-            if steps_event:
-                derived_events.append(steps_event)
+            if self.is_metric_enabled("behavior.steps:daily_total"):
+                steps_event = self._compute_daily_steps(db, date_str, day_ts)
+                if steps_event:
+                    derived_events.append(steps_event)
 
             # --- Movement entropy ---
-            entropy_event = self._compute_movement_entropy(db, date_str, day_ts)
-            if entropy_event:
-                derived_events.append(entropy_event)
+            if self.is_metric_enabled("behavior.steps.derived:movement_entropy"):
+                entropy_event = self._compute_movement_entropy(db, date_str, day_ts)
+                if entropy_event:
+                    derived_events.append(entropy_event)
 
             # --- Sedentary bouts ---
-            sed_event = self._compute_sedentary_bouts(db, date_str, day_ts)
-            if sed_event:
-                derived_events.append(sed_event)
+            if self.is_metric_enabled("behavior.steps.derived:sedentary_bouts"):
+                sed_event = self._compute_sedentary_bouts(db, date_str, day_ts)
+                if sed_event:
+                    derived_events.append(sed_event)
 
             # --- Unlock hourly summary ---
-            unlock_event = self._compute_unlock_summary(db, date_str, day_ts)
-            if unlock_event:
-                derived_events.append(unlock_event)
+            if self.is_metric_enabled("behavior.unlock:hourly_summary"):
+                unlock_event = self._compute_unlock_summary(db, date_str, day_ts)
+                if unlock_event:
+                    derived_events.append(unlock_event)
 
             # --- Dream frequency (rolling 7d) ---
-            dream_event = self._compute_dream_frequency(db, date_str, day_ts)
-            if dream_event:
-                derived_events.append(dream_event)
+            if self.is_metric_enabled("behavior.dream.derived:dream_frequency"):
+                dream_event = self._compute_dream_frequency(db, date_str, day_ts)
+                if dream_event:
+                    derived_events.append(dream_event)
 
             # --- Attention span estimate ---
-            attn_event = self._compute_attention_span(db, date_str, day_ts)
-            if attn_event:
-                derived_events.append(attn_event)
+            if self.is_metric_enabled("behavior.derived:attention_span_estimate"):
+                attn_event = self._compute_attention_span(db, date_str, day_ts)
+                if attn_event:
+                    derived_events.append(attn_event)
 
             # --- Morning inertia ---
-            inertia_event = self._compute_morning_inertia(db, date_str, day_ts)
-            if inertia_event:
-                derived_events.append(inertia_event)
+            if self.is_metric_enabled("behavior.derived:morning_inertia_score"):
+                inertia_event = self._compute_morning_inertia(db, date_str, day_ts)
+                if inertia_event:
+                    derived_events.append(inertia_event)
 
             # --- Digital restlessness (needs baseline) ---
-            restless_event = self._compute_digital_restlessness(
-                db, date_str, day_ts, baseline_days
-            )
-            if restless_event:
-                derived_events.append(restless_event)
+            if self.is_metric_enabled("behavior.derived:digital_restlessness"):
+                restless_event = self._compute_digital_restlessness(
+                    db, date_str, day_ts, baseline_days
+                )
+                if restless_event:
+                    derived_events.append(restless_event)
 
             # --- Behavioral consistency (needs baseline) ---
-            consist_event = self._compute_behavioral_consistency(
-                db, date_str, day_ts, baseline_days
-            )
-            if consist_event:
-                derived_events.append(consist_event)
+            if self.is_metric_enabled("behavior.derived:behavioral_consistency"):
+                consist_event = self._compute_behavioral_consistency(
+                    db, date_str, day_ts, baseline_days
+                )
+                if consist_event:
+                    derived_events.append(consist_event)
 
         # Insert all derived events
         if derived_events:

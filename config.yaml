@@ -49,6 +49,7 @@ lifedata:
   modules:
     device:
       enabled: true
+      # disabled_metrics: []  # e.g. ["device.derived:battery_drain_rate"]
 
     environment:
       enabled: true

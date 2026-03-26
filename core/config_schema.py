@@ -52,10 +52,12 @@ class SecurityConfig(BaseModel):
 
 class DeviceModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
 
 
 class EnvironmentModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     weather_api_key: str = ""
     airnow_api_key: str = ""
     ambee_api_key: str = ""
@@ -76,6 +78,7 @@ class EnvironmentModuleConfig(BaseModel):
 
 class BodyModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     sensor_logger_dir: str = "logs/sensors"
     sensor_window_minutes: int = 5
     caffeine_half_life_hours: float = 5.0
@@ -108,6 +111,11 @@ class BodyModuleConfig(BaseModel):
 
 class MindModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
+    subjective_day_score_weights: dict[str, float] = {
+        "mood": 0.3, "energy": 0.2, "productivity": 0.2,
+        "sleep": 0.15, "stress": 0.15,
+    }
 
 
 class RSSFeed(BaseModel):
@@ -118,6 +126,7 @@ class RSSFeed(BaseModel):
 
 class WorldModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     newsapi_key: str = ""
     eia_api_key: str = ""
     rss_feeds: list[RSSFeed] = []
@@ -125,12 +134,17 @@ class WorldModuleConfig(BaseModel):
 
 class SocialModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     anonymize_contacts: bool = True
     app_overrides: dict[str, Any] = {}
+    density_score_weights: dict[str, float] = {
+        "call": 3.0, "sms": 2.0, "notification": 0.1,
+    }
 
 
 class MediaModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     whisper_model: str = "base"
     auto_transcribe: bool = True
     photo_extract_exif: bool = True
@@ -149,10 +163,15 @@ class MediaModuleConfig(BaseModel):
 
 class MetaModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
 
 
 class CognitionModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
+    cognitive_load_weights: dict[str, float] = {
+        "rt": 0.3, "memory": 0.3, "time": 0.2, "typing": 0.2,
+    }
     simple_rt_trials: int = 3
     choice_rt_trials: int = 5
     gonogo_trials: int = 10
@@ -193,6 +212,7 @@ class CognitionModuleConfig(BaseModel):
 
 class BehaviorModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     fragmentation_ceiling: int = 60
     min_dwell_sec: int = 1
     max_dwell_sec: int = 3600
@@ -232,6 +252,7 @@ class BehaviorModuleConfig(BaseModel):
 
 class OracleModuleConfig(BaseModel):
     enabled: bool = True
+    disabled_metrics: list[str] = []
     home_lat: str = ""
     home_lon: str = ""
     analysis_window_days: int = 90

@@ -3,10 +3,12 @@ Tests for core/orchestrator.py — path safety, env var resolution, module allow
 """
 
 import os
+import time
+
 import pytest
 
 from core.config import _resolve_env_vars
-from core.orchestrator import Orchestrator
+from core.orchestrator import Orchestrator, enforce_log_rotation
 
 
 # ──────────────────────────────────────────────────────────────
@@ -116,3 +118,45 @@ class TestResolveEnvVars:
         config = {"count": 42, "flag": True, "ratio": 3.14}
         _resolve_env_vars(config)
         assert config == {"count": 42, "flag": True, "ratio": 3.14}
+
+
+# ──────────────────────────────────────────────────────────────
+# Log rotation — enforce_log_rotation
+# ──────────────────────────────────────────────────────────────
+
+
+class TestLogRotation:
+    """Test enforce_log_rotation() deletes old log files correctly."""
+
+    def test_old_log_file_deleted(self, tmp_path):
+        """Log files older than max_age_days should be deleted."""
+        old_log = tmp_path / "etl.log"
+        old_log.write_text("old log data")
+        # Set mtime to 45 days ago
+        old_mtime = time.time() - (45 * 86400)
+        os.utime(old_log, (old_mtime, old_mtime))
+
+        enforce_log_rotation(str(tmp_path), max_age_days=30)
+
+        assert not old_log.exists()
+
+    def test_recent_log_file_kept(self, tmp_path):
+        """Log files newer than max_age_days should be kept."""
+        recent_log = tmp_path / "etl.log"
+        recent_log.write_text("recent log data")
+        # mtime is now (default), well within 30 days
+
+        enforce_log_rotation(str(tmp_path), max_age_days=30)
+
+        assert recent_log.exists()
+
+    def test_non_log_file_not_touched(self, tmp_path):
+        """Non-log files should never be deleted regardless of age."""
+        data_file = tmp_path / "important.db"
+        data_file.write_text("database data")
+        old_mtime = time.time() - (45 * 86400)
+        os.utime(data_file, (old_mtime, old_mtime))
+
+        enforce_log_rotation(str(tmp_path), max_age_days=30)
+
+        assert data_file.exists()

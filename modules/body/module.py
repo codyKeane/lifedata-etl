@@ -218,176 +218,179 @@ class BodyModule(ModuleInterface):
         day_ts = f"{today}T23:59:00+00:00"
 
         # --- Daily step total ---
-        rows = db.execute(
-            """
-            SELECT SUM(value_numeric) as total_steps, COUNT(*) as readings
-            FROM events
-            WHERE source_module = 'body.steps'
-              AND date(timestamp_utc) = ?
-              AND value_numeric IS NOT NULL
-            """,
-            (today,),
-        )
-        row: Any = (
-            rows.fetchone()
-            if hasattr(rows, "fetchone")
-            else (list(rows)[0] if rows else None)
-        )
-        if row and row[0] is not None and row[0] > 0:
-            step_total = int(row[0])
-            step_goal = self._config.get("step_goal", 8000)
-            derived_events.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="body.derived",
-                    event_type="daily_step_total",
-                    value_numeric=float(step_total),
-                    value_json=safe_json(
-                        {
-                            "readings": row[1],
-                            "goal": step_goal,
-                            "goal_pct": round(step_total / step_goal * 100, 1),
-                        }
-                    ),
-                    confidence=0.95,
-                    parser_version=self.version,
+        if self.is_metric_enabled("body.derived:daily_step_total"):
+            rows = db.execute(
+                """
+                SELECT SUM(value_numeric) as total_steps, COUNT(*) as readings
+                FROM events
+                WHERE source_module = 'body.steps'
+                  AND date(timestamp_utc) = ?
+                  AND value_numeric IS NOT NULL
+                """,
+                (today,),
+            )
+            row: Any = (
+                rows.fetchone()
+                if hasattr(rows, "fetchone")
+                else (list(rows)[0] if rows else None)
+            )
+            if row and row[0] is not None and row[0] > 0:
+                step_total = int(row[0])
+                step_goal = self._config.get("step_goal", 8000)
+                derived_events.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="body.derived",
+                        event_type="daily_step_total",
+                        value_numeric=float(step_total),
+                        value_json=safe_json(
+                            {
+                                "readings": row[1],
+                                "goal": step_goal,
+                                "goal_pct": round(step_total / step_goal * 100, 1),
+                            }
+                        ),
+                        confidence=0.95,
+                        parser_version=self.version,
+                    )
                 )
-            )
-            log.info(
-                f"Daily steps: {step_total} ({round(step_total / step_goal * 100, 1)}% of goal)"
-            )
+                log.info(
+                    f"Daily steps: {step_total} ({round(step_total / step_goal * 100, 1)}% of goal)"
+                )
 
         # --- Caffeine pharmacokinetic model ---
-        half_life = self._config.get("caffeine_half_life_hours", 5.0)
-        rows = db.execute(
-            """
-            SELECT timestamp_utc, value_numeric
-            FROM events
-            WHERE source_module = 'body.caffeine'
-              AND event_type = 'intake'
-              AND value_numeric IS NOT NULL
-              AND date(timestamp_utc) = ?
-            ORDER BY timestamp_utc
-            """,
-            (today,),
-        )
-        caffeine_events = []
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
-        for r in result_set:
-            ts = r[0]
-            mg = safe_float(r[1])
-            if mg and mg > 0:
-                caffeine_events.append((ts, mg))
+        if self.is_metric_enabled("body.derived:caffeine_level"):
+            half_life = self._config.get("caffeine_half_life_hours", 5.0)
+            rows = db.execute(
+                """
+                SELECT timestamp_utc, value_numeric
+                FROM events
+                WHERE source_module = 'body.caffeine'
+                  AND event_type = 'intake'
+                  AND value_numeric IS NOT NULL
+                  AND date(timestamp_utc) = ?
+                ORDER BY timestamp_utc
+                """,
+                (today,),
+            )
+            caffeine_events = []
+            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            for r in result_set:
+                ts = r[0]
+                mg = safe_float(r[1])
+                if mg and mg > 0:
+                    caffeine_events.append((ts, mg))
 
-        if caffeine_events:
-            # Use end-of-day as reference for decay calculation (deterministic)
-            ref_dt = datetime.fromisoformat(day_ts)
-            total_remaining = 0.0
-            for ts, mg in caffeine_events:
-                try:
-                    intake_dt = datetime.fromisoformat(ts)
-                    if intake_dt.tzinfo is None:
-                        intake_dt = intake_dt.replace(tzinfo=UTC)
-                    hours_elapsed = (ref_dt - intake_dt).total_seconds() / 3600
-                    if hours_elapsed < 0:
+            if caffeine_events:
+                # Use end-of-day as reference for decay calculation (deterministic)
+                ref_dt = datetime.fromisoformat(day_ts)
+                total_remaining = 0.0
+                for ts, mg in caffeine_events:
+                    try:
+                        intake_dt = datetime.fromisoformat(ts)
+                        if intake_dt.tzinfo is None:
+                            intake_dt = intake_dt.replace(tzinfo=UTC)
+                        hours_elapsed = (ref_dt - intake_dt).total_seconds() / 3600
+                        if hours_elapsed < 0:
+                            continue
+                        remaining = mg * (0.5 ** (hours_elapsed / half_life))
+                        total_remaining += remaining
+                    except (ValueError, TypeError):
                         continue
-                    remaining = mg * (0.5 ** (hours_elapsed / half_life))
-                    total_remaining += remaining
-                except (ValueError, TypeError):
-                    continue
 
-            total_remaining = round(total_remaining, 1)
-            derived_events.append(
-                Event(
-                    timestamp_utc=day_ts,
-                    timestamp_local=day_ts,
-                    timezone_offset="-0500",
-                    source_module="body.derived",
-                    event_type="caffeine_level",
-                    value_numeric=total_remaining,
-                    value_json=safe_json(
-                        {
-                            "intakes_today": len(caffeine_events),
-                            "total_ingested_mg": sum(mg for _, mg in caffeine_events),
-                            "half_life_hours": half_life,
-                        }
-                    ),
-                    confidence=0.85,
-                    parser_version=self.version,
+                total_remaining = round(total_remaining, 1)
+                derived_events.append(
+                    Event(
+                        timestamp_utc=day_ts,
+                        timestamp_local=day_ts,
+                        timezone_offset="-0500",
+                        source_module="body.derived",
+                        event_type="caffeine_level",
+                        value_numeric=total_remaining,
+                        value_json=safe_json(
+                            {
+                                "intakes_today": len(caffeine_events),
+                                "total_ingested_mg": sum(mg for _, mg in caffeine_events),
+                                "half_life_hours": half_life,
+                            }
+                        ),
+                        confidence=0.85,
+                        parser_version=self.version,
+                    )
                 )
-            )
-            log.info(
-                f"Caffeine level: {total_remaining}mg remaining "
-                f"({len(caffeine_events)} intakes today)"
-            )
+                log.info(
+                    f"Caffeine level: {total_remaining}mg remaining "
+                    f"({len(caffeine_events)} intakes today)"
+                )
 
         # --- Sleep duration from start/end pairs ---
-        rows = db.execute(
-            """
-            SELECT event_type, timestamp_utc
-            FROM events
-            WHERE source_module = 'body.sleep'
-              AND event_type IN ('sleep_start', 'sleep_end')
-              AND date(timestamp_utc) >= date(?, '-1 day')
-              AND date(timestamp_utc) <= ?
-            ORDER BY timestamp_utc
-            """,
-            (today, today),
-        )
-        sleep_events = []
-        result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
-        for r in result_set:
-            sleep_events.append((r[0], r[1]))
+        if self.is_metric_enabled("body.derived:sleep_duration"):
+            rows = db.execute(
+                """
+                SELECT event_type, timestamp_utc
+                FROM events
+                WHERE source_module = 'body.sleep'
+                  AND event_type IN ('sleep_start', 'sleep_end')
+                  AND date(timestamp_utc) >= date(?, '-1 day')
+                  AND date(timestamp_utc) <= ?
+                ORDER BY timestamp_utc
+                """,
+                (today, today),
+            )
+            sleep_events = []
+            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            for r in result_set:
+                sleep_events.append((r[0], r[1]))
 
-        # Pair the last sleep_start with the first sleep_end after it
-        last_start = None
-        for event_type, ts in sleep_events:
-            if event_type == "sleep_start":
-                last_start = ts
-            elif event_type == "sleep_end" and last_start:
-                try:
-                    start_dt = datetime.fromisoformat(last_start)
-                    end_dt = datetime.fromisoformat(ts)
-                    if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=UTC)
-                    if end_dt.tzinfo is None:
-                        end_dt = end_dt.replace(tzinfo=UTC)
-                    duration_min = (end_dt - start_dt).total_seconds() / 60
-                    duration_hours = round(duration_min / 60, 2)
+            # Pair the last sleep_start with the first sleep_end after it
+            last_start = None
+            for event_type, ts in sleep_events:
+                if event_type == "sleep_start":
+                    last_start = ts
+                elif event_type == "sleep_end" and last_start:
+                    try:
+                        start_dt = datetime.fromisoformat(last_start)
+                        end_dt = datetime.fromisoformat(ts)
+                        if start_dt.tzinfo is None:
+                            start_dt = start_dt.replace(tzinfo=UTC)
+                        if end_dt.tzinfo is None:
+                            end_dt = end_dt.replace(tzinfo=UTC)
+                        duration_min = (end_dt - start_dt).total_seconds() / 60
+                        duration_hours = round(duration_min / 60, 2)
 
-                    if 0 < duration_hours < 24:  # sanity check
-                        sleep_target = self._config.get("sleep_target_hours", 7.5)
-                        derived_events.append(
-                            Event(
-                                timestamp_utc=day_ts,
-                                timestamp_local=day_ts,
-                                timezone_offset="-0500",
-                                source_module="body.derived",
-                                event_type="sleep_duration",
-                                value_numeric=duration_hours,
-                                value_json=safe_json(
-                                    {
-                                        "duration_min": round(duration_min, 0),
-                                        "target_hours": sleep_target,
-                                        "delta_hours": round(
-                                            duration_hours - sleep_target, 2
-                                        ),
-                                    }
-                                ),
-                                confidence=0.9,
-                                parser_version=self.version,
+                        if 0 < duration_hours < 24:  # sanity check
+                            sleep_target = self._config.get("sleep_target_hours", 7.5)
+                            derived_events.append(
+                                Event(
+                                    timestamp_utc=day_ts,
+                                    timestamp_local=day_ts,
+                                    timezone_offset="-0500",
+                                    source_module="body.derived",
+                                    event_type="sleep_duration",
+                                    value_numeric=duration_hours,
+                                    value_json=safe_json(
+                                        {
+                                            "duration_min": round(duration_min, 0),
+                                            "target_hours": sleep_target,
+                                            "delta_hours": round(
+                                                duration_hours - sleep_target, 2
+                                            ),
+                                        }
+                                    ),
+                                    confidence=0.9,
+                                    parser_version=self.version,
+                                )
                             )
-                        )
-                        log.info(
-                            f"Sleep duration: {duration_hours}h "
-                            f"(target: {sleep_target}h, "
-                            f"delta: {round(duration_hours - sleep_target, 2):+}h)"
-                        )
-                except (ValueError, TypeError):
-                    pass
-                last_start = None  # Reset for next pair
+                            log.info(
+                                f"Sleep duration: {duration_hours}h "
+                                f"(target: {sleep_target}h, "
+                                f"delta: {round(duration_hours - sleep_target, 2):+}h)"
+                            )
+                    except (ValueError, TypeError):
+                        pass
+                    last_start = None  # Reset for next pair
 
         return derived_events
 
