@@ -6,7 +6,12 @@ import os
 from datetime import UTC, datetime, timedelta
 
 from core.event import Event
-from analysis.reports import generate_daily_report, _sparkline
+from analysis.reports import (
+    generate_daily_report,
+    generate_weekly_report,
+    generate_monthly_report,
+    _sparkline,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -174,3 +179,93 @@ class TestGenerateDailyReport:
         _insert_sample_events(db)
         path = generate_daily_report(db, config=config, date_str=_DATE_STR)
         assert path.endswith(".md")
+
+
+# ──────────────────────────────────────────────────────────────
+# Helpers for multi-day data
+# ──────────────────────────────────────────────────────────────
+
+
+def _insert_multiday_events(db, end_date_str, num_days):
+    """Insert sample events across multiple days ending at end_date_str."""
+    from datetime import date
+
+    end_dt = date.fromisoformat(end_date_str)
+    all_events = []
+    for offset in range(num_days):
+        day = end_dt - timedelta(days=offset)
+        day_str = day.isoformat()
+        all_events.extend([
+            _make_event("device.battery", "pulse", value_numeric=85.0 + offset,
+                        date_str=day_str, hour=8),
+            _make_event("device.screen", "screen_on", value_numeric=1.0,
+                        date_str=day_str, hour=9),
+            _make_event("mind.mood", "check_in", value_numeric=6.0 + (offset % 4),
+                        date_str=day_str, hour=10),
+            _make_event("environment.hourly", "snapshot", value_numeric=70.0 + offset,
+                        date_str=day_str, hour=12),
+        ])
+    db.insert_events_for_module("test_reports_multi", all_events)
+    return all_events
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGenerateWeeklyReport
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGenerateWeeklyReport:
+    def test_generate_weekly_report_creates_file(self, db, tmp_path):
+        """Populates 7 days of data, generates weekly report, verifies file exists
+        and contains expected sections."""
+        config = _make_config(tmp_path)
+        end_date = _DATE_STR
+        _insert_multiday_events(db, end_date, 7)
+        path = generate_weekly_report(db, config=config, end_date=end_date)
+        assert os.path.isfile(path)
+        expected_dir = str(tmp_path / "reports" / "weekly")
+        assert path.startswith(expected_dir)
+        assert path.endswith(".md")
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        assert "Weekly Report" in content
+        assert end_date in content
+        assert "## Module Summaries" in content
+        assert "## Anomaly Summary" in content
+        assert "Total events:" in content
+
+    def test_weekly_report_no_data_still_creates(self, db, tmp_path):
+        """Empty database still produces a weekly report with zero counts."""
+        config = _make_config(tmp_path)
+        path = generate_weekly_report(db, config=config, end_date=_DATE_STR)
+        assert os.path.isfile(path)
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        assert "Weekly Report" in content
+        assert "Total events: 0" in content
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGenerateMonthlyReport
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGenerateMonthlyReport:
+    def test_generate_monthly_report_creates_file(self, db, tmp_path):
+        """Populates 30 days of data, generates monthly report, verifies file exists
+        and contains expected sections."""
+        config = _make_config(tmp_path)
+        end_date = _DATE_STR
+        _insert_multiday_events(db, end_date, 30)
+        path = generate_monthly_report(db, config=config, end_date=end_date)
+        assert os.path.isfile(path)
+        expected_dir = str(tmp_path / "reports" / "monthly")
+        assert path.startswith(expected_dir)
+        assert path.endswith(".md")
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        assert "Monthly Report" in content
+        assert end_date in content
+        assert "## Module Summaries" in content
+        assert "## Anomaly Summary" in content
+        assert "Total events:" in content

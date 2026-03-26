@@ -345,6 +345,16 @@ def main() -> int:
         metavar="RAW_SOURCE_ID",
         help="Trace an event by raw_source_id: show full record, source file, downstream data",
     )
+    parser.add_argument(
+        "--weekly-report",
+        action="store_true",
+        help="Generate weekly report after ETL",
+    )
+    parser.add_argument(
+        "--monthly-report",
+        action="store_true",
+        help="Generate monthly report after ETL",
+    )
     args = parser.parse_args()
 
     if args.status:
@@ -364,6 +374,27 @@ def main() -> int:
             single_module=args.module,
             dry_run=args.dry_run,
         )
+
+        # Weekly / monthly report generation (after ETL, like --report)
+        if not args.dry_run:
+            config_dump = orch.config.model_dump()
+            if args.weekly_report:
+                try:
+                    from analysis.reports import generate_weekly_report
+
+                    generate_weekly_report(orch.db, orch.modules, config_dump)
+                    print("Weekly report generated")
+                except Exception as e:
+                    print(f"Weekly report generation failed: {e}", file=sys.stderr)
+
+            if args.monthly_report:
+                try:
+                    from analysis.reports import generate_monthly_report
+
+                    generate_monthly_report(orch.db, orch.modules, config_dump)
+                    print("Monthly report generated")
+                except Exception as e:
+                    print(f"Monthly report generation failed: {e}", file=sys.stderr)
 
         # Non-zero exit on module failures
         if summary.get("failed_modules"):

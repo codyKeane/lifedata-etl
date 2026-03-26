@@ -447,3 +447,5 @@ lifedata:
     news_cron: "0 */4 * * *"
     astro_cron: "0 5 * * *"
     analysis_cron: "0 0 * * 0"
+    weekly_report_cron: "0 1 * * 1"
+    monthly_report_cron: "0 2 1 * *"

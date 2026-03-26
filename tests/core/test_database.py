@@ -581,6 +581,92 @@ class TestBackup:
 # ──────────────────────────────────────────────────────────────
 
 
+class TestSchemaMigrations:
+    """Versioned schema migration tracking via apply_migrations."""
+
+    def test_apply_migrations_creates_table(self, db):
+        """Apply 2 migrations, verify both tables exist."""
+        migrations = [
+            "CREATE TABLE IF NOT EXISTS mod_alpha (id TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS mod_beta (id TEXT PRIMARY KEY, val REAL)",
+        ]
+        applied = db.apply_migrations("test_mod", migrations)
+        assert applied == 2
+
+        tables = {
+            row[0]
+            for row in db.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "mod_alpha" in tables
+        assert "mod_beta" in tables
+
+    def test_apply_migrations_skips_already_applied(self, db):
+        """Apply 2 migrations, then call again with 3 — only the 3rd runs."""
+        migrations_v2 = [
+            "CREATE TABLE IF NOT EXISTS skip_a (id TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS skip_b (id TEXT PRIMARY KEY)",
+        ]
+        applied1 = db.apply_migrations("skip_mod", migrations_v2)
+        assert applied1 == 2
+
+        migrations_v3 = migrations_v2 + [
+            "CREATE TABLE IF NOT EXISTS skip_c (id TEXT PRIMARY KEY)",
+        ]
+        applied2 = db.apply_migrations("skip_mod", migrations_v3)
+        assert applied2 == 1
+
+        tables = {
+            row[0]
+            for row in db.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "skip_c" in tables
+
+    def test_apply_migrations_records_version(self, db):
+        """Verify schema_versions table has correct entries."""
+        migrations = [
+            "CREATE TABLE IF NOT EXISTS rec_a (id TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS rec_b (id TEXT PRIMARY KEY)",
+        ]
+        db.apply_migrations("rec_mod", migrations)
+
+        rows = db.conn.execute(
+            "SELECT module_id, version, sql_hash FROM schema_versions "
+            "WHERE module_id = 'rec_mod' ORDER BY version"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0][0] == "rec_mod"
+        assert rows[0][1] == 0
+        assert rows[1][1] == 1
+        # Hashes should be non-empty strings
+        assert len(rows[0][2]) == 64
+        assert len(rows[1][2]) == 64
+
+    def test_get_migration_version_no_migrations(self, db):
+        """Returns -1 when no migrations have been applied."""
+        assert db.get_migration_version("nonexistent_mod") == -1
+
+    def test_apply_migrations_empty_list(self, db):
+        """Empty list is a no-op, returns 0."""
+        applied = db.apply_migrations("empty_mod", [])
+        assert applied == 0
+
+    def test_migration_idempotent(self, db):
+        """Calling apply_migrations twice with same list applies nothing the second time."""
+        migrations = [
+            "CREATE TABLE IF NOT EXISTS idem_a (id TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS idem_b (id TEXT PRIMARY KEY)",
+        ]
+        applied1 = db.apply_migrations("idem_mod", migrations)
+        assert applied1 == 2
+
+        applied2 = db.apply_migrations("idem_mod", migrations)
+        assert applied2 == 0
+
+
 class TestContextManager:
     def test_context_manager_closes(self, tmp_path):
         db_path = str(tmp_path / "ctx.db")

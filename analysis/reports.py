@@ -268,3 +268,294 @@ def generate_daily_report(
 
     log.info(f"Daily report written to {report_path}")
     return report_path
+
+
+def _generate_period_report(
+    db,
+    modules: list = None,
+    config: dict = None,
+    end_date: str | None = None,
+    period_days: int = 7,
+    period_label: str = "Weekly",
+    subdir: str = "weekly",
+) -> str:
+    """Generate a weekly or monthly aggregated report in markdown.
+
+    Aggregates daily data over the period rather than recomputing from scratch.
+
+    Args:
+        db: Database instance.
+        modules: List of module instances.
+        config: Full config dict.
+        end_date: Last day of the period (default: today local).
+        period_days: Number of days to cover (7 for weekly, 30 for monthly).
+        period_label: Human label ("Weekly" or "Monthly").
+        subdir: Subdirectory under reports_dir ("weekly" or "monthly").
+
+    Returns:
+        Path to the generated report file.
+    """
+    tz_name = "America/Chicago"
+    if config:
+        tz_name = config.get("lifedata", {}).get("timezone", tz_name)
+
+    end_date = end_date or today_local(tz_name)
+    sections: list[str] = []
+
+    # Compute start date using SQLite date math for consistency
+    start_date_row = db.conn.execute(
+        "SELECT date(?, ?)",
+        [end_date, f"-{period_days - 1} days"],
+    ).fetchone()
+    start_date = start_date_row[0]
+
+    # ── Header ──
+    sections.append(
+        f"# LifeData {period_label} Report — {start_date} to {end_date}\n"
+    )
+    sections.append(
+        f"*Generated {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}*\n"
+    )
+
+    # ── Summary Statistics (trend metrics over the period) ──
+    analysis_cfg = (config or {}).get("lifedata", {}).get("analysis", {})
+    report_cfg = analysis_cfg.get("report", {})
+    configured_trends = report_cfg.get("trend_metrics", [])
+
+    if configured_trends:
+        trend_metrics = []
+        for name in configured_trends:
+            if ":" in name:
+                src, evt = name.split(":", 1)
+                label = evt.replace("_", " ").title()
+                trend_metrics.append((label, src, "AVG", evt))
+            else:
+                label = name.split(".")[-1].replace("_", " ").title()
+                trend_metrics.append((label, name, "AVG", None))
+    else:
+        trend_metrics = [
+            ("Mood", "mind.mood", "AVG", None),
+            ("Steps", "body.steps", "SUM", None),
+            ("Screen time", "device.derived", "AVG", "screen_time_minutes"),
+            ("Reaction time", "cognition.reaction", "AVG", None),
+        ]
+
+    stat_rows_data: list[tuple[str, float, float, float, str]] = []
+
+    for label, source_mod, agg_fn, event_type_filter in trend_metrics:
+        if event_type_filter:
+            daily_rows = db.conn.execute(
+                f"""
+                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                FROM events
+                WHERE source_module = ?
+                  AND event_type = ?
+                  AND date(timestamp_local) BETWEEN ? AND ?
+                  AND value_numeric IS NOT NULL
+                GROUP BY d
+                ORDER BY d
+                """,
+                [source_mod, event_type_filter, start_date, end_date],
+            ).fetchall()
+        else:
+            daily_rows = db.conn.execute(
+                f"""
+                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                FROM events
+                WHERE source_module = ?
+                  AND date(timestamp_local) BETWEEN ? AND ?
+                  AND value_numeric IS NOT NULL
+                GROUP BY d
+                ORDER BY d
+                """,
+                [source_mod, start_date, end_date],
+            ).fetchall()
+
+        if daily_rows:
+            vals = [r[1] for r in daily_rows]
+            avg_val = sum(vals) / len(vals)
+            min_val = min(vals)
+            max_val = max(vals)
+            spark = _sparkline(vals) if len(vals) >= 2 else ""
+            stat_rows_data.append((label, avg_val, min_val, max_val, spark))
+
+    if stat_rows_data:
+        sections.append("## Summary Statistics\n")
+        sections.append("| Metric | Avg | Min | Max | Trend |")
+        sections.append("|--------|-----|-----|-----|-------|")
+        for label, avg_val, min_val, max_val, spark in stat_rows_data:
+            sections.append(
+                f"| {label} | {avg_val:.1f} | {min_val:.1f} | {max_val:.1f} | {spark} |"
+            )
+        sections.append("")
+
+    # ── Module Summaries (event counts per module over the period) ──
+    sections.append("## Module Summaries\n")
+
+    rows = db.conn.execute(
+        """
+        SELECT source_module, COUNT(*) as n
+        FROM events
+        WHERE date(timestamp_local) BETWEEN ? AND ?
+        GROUP BY source_module
+        ORDER BY n DESC
+        """,
+        [start_date, end_date],
+    ).fetchall()
+
+    total = sum(r[1] for r in rows)
+    sections.append(f"**Total events: {total:,}**\n")
+    sections.append("| Source | Count |")
+    sections.append("|--------|-------|")
+    for row in rows:
+        sections.append(f"| {row[0]} | {row[1]:,} |")
+    sections.append("")
+
+    # ── Anomaly Summary (count anomalies over the period) ──
+    detector = AnomalyDetector(db, config=config)
+    total_anomalies = 0
+
+    # Check each day in the period for anomalies
+    date_cursor_rows = db.conn.execute(
+        """
+        SELECT date(?, '+' || seq || ' days') as d
+        FROM (
+            SELECT 0 as seq
+            UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
+            UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6
+            UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12
+            UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15
+            UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18
+            UNION ALL SELECT 19 UNION ALL SELECT 20 UNION ALL SELECT 21
+            UNION ALL SELECT 22 UNION ALL SELECT 23 UNION ALL SELECT 24
+            UNION ALL SELECT 25 UNION ALL SELECT 26 UNION ALL SELECT 27
+            UNION ALL SELECT 28 UNION ALL SELECT 29
+        )
+        WHERE d BETWEEN ? AND ?
+        ORDER BY d
+        """,
+        [start_date, start_date, end_date],
+    ).fetchall()
+
+    for row in date_cursor_rows:
+        day_str = row[0]
+        try:
+            day_anomalies = detector.check_today(day_str)
+            total_anomalies += len(day_anomalies)
+        except Exception:
+            pass
+
+    sections.append("## Anomaly Summary\n")
+    sections.append(f"**Total anomalies detected: {total_anomalies}**\n")
+
+    # ── Hypothesis Results ──
+    hypotheses_cfg = analysis_cfg.get("hypotheses", [])
+    if hypotheses_cfg:
+        sections.append("## Hypothesis Results\n")
+        sections.append("| Hypothesis | Direction | Status |")
+        sections.append("|------------|-----------|--------|")
+        for h in hypotheses_cfg:
+            if not h.get("enabled", True):
+                continue
+            name = h.get("name", "?")
+            direction = h.get("direction", "any")
+            # Query correlation data for the two metrics over the period
+            metric_a = h.get("metric_a", "")
+            metric_b = h.get("metric_b", "")
+            corr_row = db.conn.execute(
+                """
+                SELECT pearson_r FROM correlations
+                WHERE metric_a = ? AND metric_b = ?
+                ORDER BY computed_utc DESC LIMIT 1
+                """,
+                [metric_a, metric_b],
+            ).fetchone()
+            if corr_row and corr_row[0] is not None:
+                r = corr_row[0]
+                if direction == "positive":
+                    status = "Supported" if r > 0 else "Not supported"
+                elif direction == "negative":
+                    status = "Supported" if r < 0 else "Not supported"
+                else:
+                    status = f"r={r:.3f}"
+            else:
+                status = "Insufficient data"
+            sections.append(f"| {name} | {direction} | {status} |")
+        sections.append("")
+
+    # ── Write Report ──
+    reports_dir = "~/LifeData/reports/" + subdir
+    if config:
+        reports_dir = config.get("lifedata", {}).get(
+            "reports_dir", "~/LifeData/reports"
+        )
+        reports_dir = os.path.join(reports_dir, subdir)
+
+    expanded_dir = os.path.expanduser(reports_dir)
+    os.makedirs(expanded_dir, exist_ok=True)
+
+    report_path = os.path.join(expanded_dir, f"report_{end_date}.md")
+    report_content = "\n".join(sections)
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(report_content)
+
+    log.info(f"{period_label} report written to {report_path}")
+    return report_path
+
+
+def generate_weekly_report(
+    db,
+    modules: list = None,
+    config: dict = None,
+    end_date: str | None = None,
+) -> str:
+    """Generate a weekly report covering the last 7 days.
+
+    Args:
+        db: Database instance.
+        modules: List of module instances.
+        config: Full config dict.
+        end_date: Last day of the period (default: today local).
+
+    Returns:
+        Path to the generated report file.
+    """
+    return _generate_period_report(
+        db,
+        modules=modules,
+        config=config,
+        end_date=end_date,
+        period_days=7,
+        period_label="Weekly",
+        subdir="weekly",
+    )
+
+
+def generate_monthly_report(
+    db,
+    modules: list = None,
+    config: dict = None,
+    end_date: str | None = None,
+) -> str:
+    """Generate a monthly report covering the last 30 days.
+
+    Args:
+        db: Database instance.
+        modules: List of module instances.
+        config: Full config dict.
+        end_date: Last day of the period (default: today local).
+
+    Returns:
+        Path to the generated report file.
+    """
+    return _generate_period_report(
+        db,
+        modules=modules,
+        config=config,
+        end_date=end_date,
+        period_days=30,
+        period_label="Monthly",
+        subdir="monthly",
+    )

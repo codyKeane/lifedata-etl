@@ -417,6 +417,8 @@ class ScheduleConfig(BaseModel):
     news_cron: str = ""
     astro_cron: str = ""
     analysis_cron: str = ""
+    weekly_report_cron: str = ""
+    monthly_report_cron: str = ""
 
 
 # ── ETL engine settings ────────────────────────────────────────

@@ -342,9 +342,12 @@ class Orchestrator:
             mm = ModuleMetrics(module_id=module.module_id, status="success")
 
             try:
-                # Schema migrations (DDL only)
-                for sql in module.schema_migrations():
-                    self.db.execute_migration(sql)
+                # Schema migrations (DDL only, versioned)
+                migrations = module.schema_migrations()
+                if migrations:
+                    applied = self.db.apply_migrations(module.module_id, migrations)
+                    if applied:
+                        log.info(f"[{module.module_id}] Applied {applied} schema migration(s)")
 
                 # Discover files → validate paths → filter extensions
                 all_files = module.discover_files(raw_base)

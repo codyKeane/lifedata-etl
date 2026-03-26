@@ -6,6 +6,7 @@ Manages the SQLite database: schema creation, event insertion with SAVEPOINT
 transactions, daily summary support, backup/restore, and query utilities.
 """
 
+import hashlib
 import os
 import sqlite3
 from collections.abc import Sequence
@@ -96,6 +97,14 @@ CREATE TABLE IF NOT EXISTS correlations (
     p_value         REAL,
     n_observations  INTEGER,
     computed_utc    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_versions (
+    module_id       TEXT NOT NULL,
+    version         INTEGER NOT NULL,
+    applied_at      TEXT NOT NULL,
+    sql_hash        TEXT NOT NULL,
+    PRIMARY KEY (module_id, version)
 );
 """
 
@@ -467,6 +476,63 @@ class Database:
             )
         log.info(f"Executing migration: {sql[:80]}...")
         return self.conn.execute(sql)
+
+    def get_migration_version(self, module_id: str) -> int:
+        """Return the highest applied migration version for a module, or -1 if none."""
+        row = self.conn.execute(
+            "SELECT MAX(version) FROM schema_versions WHERE module_id = ?",
+            (module_id,),
+        ).fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+        return -1
+
+    def apply_migrations(self, module_id: str, migrations: list[str]) -> int:
+        """Apply pending schema migrations for a module.
+
+        Migrations are versioned by list index. Only migrations with an index
+        greater than the highest already-applied version are executed.
+
+        Args:
+            module_id: The module identifier.
+            migrations: Ordered list of DDL SQL strings. Index = version.
+
+        Returns:
+            Number of newly applied migrations.
+        """
+        if not migrations:
+            return 0
+
+        current_version = self.get_migration_version(module_id)
+        pending = [
+            (idx, sql)
+            for idx, sql in enumerate(migrations)
+            if idx > current_version
+        ]
+
+        if not pending:
+            return 0
+
+        try:
+            self.conn.execute("BEGIN")
+            for version, sql in pending:
+                self.execute_migration(sql)
+                sql_hash = hashlib.sha256(sql.encode()).hexdigest()
+                applied_at = datetime.now(UTC).isoformat()
+                self.conn.execute(
+                    "INSERT INTO schema_versions (module_id, version, applied_at, sql_hash) "
+                    "VALUES (?, ?, ?, ?)",
+                    (module_id, version, applied_at, sql_hash),
+                )
+                log.info(
+                    f"[{module_id}] Applied migration v{version}: {sql[:60]}..."
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+        return len(pending)
 
     # Allowed first keywords for read-only queries
     _ALLOWED_READ_SQL = {"SELECT", "WITH", "EXPLAIN", "PRAGMA"}

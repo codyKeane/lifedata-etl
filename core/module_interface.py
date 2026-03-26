@@ -136,5 +136,10 @@ class ModuleInterface(ABC):
         return [e for e in events if self.is_metric_enabled(e.source_module)]
 
     def schema_migrations(self) -> list[str]:
-        """Optional: return SQL statements for module-specific tables."""
+        """Return ordered SQL DDL statements for module-specific tables.
+
+        Each entry is a version. The framework tracks which versions have been
+        applied and only runs new ones. Append new migrations to the end —
+        never modify or reorder existing entries.
+        """
         return []
