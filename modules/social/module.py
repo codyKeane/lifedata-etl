@@ -53,6 +53,48 @@ class SocialModule(ModuleInterface):
             "social.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "social.notification",
+                    "display_name": "Notifications",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "social.call",
+                    "display_name": "Calls",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "social.sms",
+                    "display_name": "SMS Messages",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "social.derived:density_score",
+                    "display_name": "Social Density",
+                    "unit": "score",
+                    "aggregate": "AVG",
+                    "event_type": "density_score",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all social/communication CSV files in the raw data tree."""
         files = []
@@ -132,7 +174,8 @@ class SocialModule(ModuleInterface):
     def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute derived social metrics for a single day."""
         derived: list[Event] = []
-        day_ts = f"{day}T12:00:00-05:00"
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{day}T23:59:00+00:00"
 
         # --- Density score ---
         # Weighted measure of human interaction volume.
@@ -330,6 +373,30 @@ class SocialModule(ModuleInterface):
                     pass
 
         return derived
+
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
+        """Return daily social metrics for report generation."""
+        bullets: list[str] = []
+
+        rows = db.conn.execute(
+            """
+            SELECT source_module, COUNT(*) as n
+            FROM events
+            WHERE source_module LIKE 'social.%'
+              AND date(timestamp_local) = ?
+            GROUP BY source_module
+            ORDER BY n DESC
+            """,
+            [date_str],
+        ).fetchall()
+
+        for row in rows:
+            label = row[0].replace("social.", "").replace("_", " ").title()
+            bullets.append(f"- {label}: {row[1]:,}")
+
+        if not bullets:
+            return None
+        return {"section_title": "Social & Apps", "bullets": bullets}
 
 
 def create_module(config: dict[str, Any] | None = None) -> SocialModule:

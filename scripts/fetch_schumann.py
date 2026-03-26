@@ -60,7 +60,7 @@ def parse_heartmath(resp) -> dict | None:
     # This is best-effort parsing — page structure may change
 
     # Pattern: look for numbers near "7.83" or "Schumann" in the text
-    freq_pattern = re.findall(r"(\d+\.\d+)\s*(?:Hz|hz)", text)
+    freq_pattern = re.findall(r"(\d+(?:\.\d+)?)\s*(?:Hz|hz)", text)
     if freq_pattern:
         for freq_str in freq_pattern:
             freq = float(freq_str)

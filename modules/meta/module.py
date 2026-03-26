@@ -59,6 +59,29 @@ class MetaModule(ModuleInterface):
             "meta.sync",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Return machine-readable manifest of metrics this module produces."""
+        return {
+            "metrics": [
+                {
+                    "name": "meta.completeness",
+                    "display_name": "Data Completeness",
+                    "unit": "%",
+                    "aggregate": "AVG",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "meta.quality",
+                    "display_name": "Data Quality Issues",
+                    "unit": "count",
+                    "aggregate": "SUM",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+            ]
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         # Meta module doesn't parse files — it inspects the database
         return []

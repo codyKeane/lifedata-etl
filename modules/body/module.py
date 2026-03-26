@@ -88,6 +88,57 @@ class BodyModule(ModuleInterface):
             "body.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "body.steps",
+                    "display_name": "Steps",
+                    "unit": "count",
+                    "aggregate": "SUM",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "body.caffeine",
+                    "display_name": "Caffeine Intake",
+                    "unit": "mg",
+                    "aggregate": "SUM",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "body.derived:daily_step_total",
+                    "display_name": "Daily Step Total",
+                    "unit": "steps",
+                    "aggregate": "SUM",
+                    "event_type": "daily_step_total",
+                    "trend_eligible": True,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "body.derived:sleep_duration",
+                    "display_name": "Sleep Duration",
+                    "unit": "hours",
+                    "aggregate": "AVG",
+                    "event_type": "sleep_duration",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "body.derived:caffeine_level",
+                    "display_name": "Caffeine Level",
+                    "unit": "mg",
+                    "aggregate": "AVG",
+                    "event_type": "caffeine_level",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all body-related CSV files in the raw data tree."""
         files = []
@@ -146,9 +197,25 @@ class BodyModule(ModuleInterface):
           - body.derived/caffeine_level: estimated blood caffeine (mg) at current hour
           - body.derived/sleep_duration: computed from start/end pairs
         """
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
-        derived_events = []
-        now_utc = datetime.now(UTC).isoformat()
+        # Determine which dates to process
+        if affected_dates:
+            days_to_process = sorted(affected_dates)
+        else:
+            days_to_process = [datetime.now(UTC).strftime("%Y-%m-%d")]
+
+        all_derived: list[Event] = []
+        for today in days_to_process:
+            all_derived.extend(self._compute_day_metrics(db, today))
+
+        if all_derived:
+            inserted, skipped = db.insert_events_for_module("body", all_derived)
+            log.info(f"Body derived: {inserted} inserted, {skipped} skipped")
+
+    def _compute_day_metrics(self, db: Database, today: str) -> list[Event]:
+        """Compute all derived body metrics for a single day."""
+        derived_events: list[Event] = []
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{today}T23:59:00+00:00"
 
         # --- Daily step total ---
         rows = db.execute(
@@ -171,8 +238,8 @@ class BodyModule(ModuleInterface):
             step_goal = self._config.get("step_goal", 8000)
             derived_events.append(
                 Event(
-                    timestamp_utc=now_utc,
-                    timestamp_local=now_utc,
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
                     timezone_offset="-0500",
                     source_module="body.derived",
                     event_type="daily_step_total",
@@ -215,14 +282,15 @@ class BodyModule(ModuleInterface):
                 caffeine_events.append((ts, mg))
 
         if caffeine_events:
-            now_dt = datetime.now(UTC)
+            # Use end-of-day as reference for decay calculation (deterministic)
+            ref_dt = datetime.fromisoformat(day_ts)
             total_remaining = 0.0
             for ts, mg in caffeine_events:
                 try:
                     intake_dt = datetime.fromisoformat(ts)
                     if intake_dt.tzinfo is None:
                         intake_dt = intake_dt.replace(tzinfo=UTC)
-                    hours_elapsed = (now_dt - intake_dt).total_seconds() / 3600
+                    hours_elapsed = (ref_dt - intake_dt).total_seconds() / 3600
                     if hours_elapsed < 0:
                         continue
                     remaining = mg * (0.5 ** (hours_elapsed / half_life))
@@ -233,8 +301,8 @@ class BodyModule(ModuleInterface):
             total_remaining = round(total_remaining, 1)
             derived_events.append(
                 Event(
-                    timestamp_utc=now_utc,
-                    timestamp_local=now_utc,
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
                     timezone_offset="-0500",
                     source_module="body.derived",
                     event_type="caffeine_level",
@@ -293,8 +361,8 @@ class BodyModule(ModuleInterface):
                         sleep_target = self._config.get("sleep_target_hours", 7.5)
                         derived_events.append(
                             Event(
-                                timestamp_utc=now_utc,
-                                timestamp_local=now_utc,
+                                timestamp_utc=day_ts,
+                                timestamp_local=day_ts,
                                 timezone_offset="-0500",
                                 source_module="body.derived",
                                 event_type="sleep_duration",
@@ -321,10 +389,7 @@ class BodyModule(ModuleInterface):
                     pass
                 last_start = None  # Reset for next pair
 
-        # Insert derived events
-        if derived_events:
-            inserted, skipped = db.insert_events_for_module("body", derived_events)
-            log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
+        return derived_events
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily body metrics for report generation."""
@@ -362,6 +427,8 @@ class BodyModule(ModuleInterface):
         return {
             "event_counts": summary,
             "total_body_events": sum(v["count"] for v in summary.values()),
+            "section_title": "Body",
+            "bullets": [],
         }
 
 

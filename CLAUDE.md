@@ -88,6 +88,9 @@ API scripts -> `raw/api/` -> World/Oracle modules parse -> same Event pipeline
 - **Idempotent ingestion** — deterministic `event_id` (UUID from SHA-256) means re-running ETL produces identical results.
 - **Path validation** — all file paths checked with `Path.is_relative_to(raw_base)` before parsing.
 - **Read-only execute** — `Database.execute()` only allows SELECT/WITH/EXPLAIN/PRAGMA.
+- **Derived metric timestamps** — All `post_ingest()` daily derived metrics use `f"{date_str}T23:59:00+00:00"` as their timestamp. This ensures deterministic hashing for `INSERT OR REPLACE` idempotency. Exceptions: meta uses `T00:00:00` (start-of-day), oracle uses `T23:59:01/02` offsets for rolling-window metrics that would otherwise collide.
+- **CSV fields are never quoted** — Tasker CSVs use bare comma separation. `parser_utils.py` uses `str.split(",")` for performance. If a data source introduces quoted fields, migrate to Python's `csv` module.
+- **PII_HMAC_KEY is mandatory** — The `PII_HMAC_KEY` environment variable must be set in `.env` for the social module to load. Generate with: `python -c "import secrets; print(secrets.token_hex(32))"`.
 
 ## Adding a New Module
 

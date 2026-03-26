@@ -52,6 +52,39 @@ class EnvironmentModule(ModuleInterface):
             "environment.emf",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "environment.hourly",
+                    "display_name": "Weather",
+                    "unit": "°F",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "environment.geomagnetic",
+                    "display_name": "Geomagnetic Activity",
+                    "unit": "Kp",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "environment.sound",
+                    "display_name": "Sound Level",
+                    "unit": "dB",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find environment, location, and astro CSVs in the raw data tree."""
         files = []
@@ -135,7 +168,8 @@ class EnvironmentModule(ModuleInterface):
     def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute all derived metrics for a single day."""
         derived: list[Event] = []
-        day_ts = f"{day}T12:00:00-05:00"
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{day}T23:59:00+00:00"
 
         # --- Daily weather composite ---
         hourly_rows = db.execute(
@@ -303,6 +337,37 @@ class EnvironmentModule(ModuleInterface):
                 )
 
         return derived
+
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
+        """Return daily environment metrics for report generation."""
+        bullets: list[str] = []
+
+        temp = db.conn.execute(
+            """
+            SELECT AVG(value_numeric), MIN(value_numeric), MAX(value_numeric)
+            FROM events
+            WHERE source_module = ?
+              AND date(timestamp_local) = ?
+              AND value_numeric IS NOT NULL
+            """,
+            ["environment.hourly", date_str],
+        ).fetchone()
+        if temp and temp[0] is not None:
+            bullets.append(
+                f"- Temperature: {temp[1]:.0f}\u00b0F \u2013 {temp[2]:.0f}\u00b0F "
+                f"(avg {temp[0]:.0f}\u00b0F)"
+            )
+
+        loc = db.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+            ["environment.location", date_str],
+        ).fetchone()
+        if loc and loc[0]:
+            bullets.append(f"- Location fixes: {loc[0]}")
+
+        if not bullets:
+            return None
+        return {"section_title": "Environment", "bullets": bullets}
 
 
 def create_module(config: dict[str, Any] | None = None) -> EnvironmentModule:

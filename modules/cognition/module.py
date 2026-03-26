@@ -54,6 +54,7 @@ class CognitionModule(ModuleInterface):
             from modules.cognition.parsers import PARSER_REGISTRY
 
             self._parser_registry = PARSER_REGISTRY
+        assert self._parser_registry is not None
         return self._parser_registry
 
     @property
@@ -81,6 +82,47 @@ class CognitionModule(ModuleInterface):
             "cognition.typing.derived",
             "cognition.derived",
         ]
+
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Return machine-readable manifest of metrics this module produces."""
+        return {
+            "metrics": [
+                {
+                    "name": "cognition.reaction",
+                    "display_name": "Reaction Time",
+                    "unit": "ms",
+                    "aggregate": "AVG",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "cognition.memory",
+                    "display_name": "Working Memory",
+                    "unit": "span",
+                    "aggregate": "MAX",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "cognition.derived:cognitive_load_index",
+                    "display_name": "Cognitive Load Index",
+                    "unit": "z-score",
+                    "aggregate": "AVG",
+                    "event_type": "cognitive_load_index",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "cognition.derived:impairment_flag",
+                    "display_name": "Impairment Flag",
+                    "unit": "binary",
+                    "aggregate": "MAX",
+                    "event_type": "impairment_flag",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+            ]
+        }
 
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all cognition CSV files in the spool/cognition directory."""
@@ -183,7 +225,8 @@ class CognitionModule(ModuleInterface):
                 derived_events.append(gap_event)
 
         # --- Peak cognition hour (rolling 14-day, computed once) ---
-        peak_event = self._compute_peak_cognition_hour(db, baseline_days)
+        ref_date = dates[-1] if dates else None
+        peak_event = self._compute_peak_cognition_hour(db, baseline_days, ref_date)
         if peak_event:
             derived_events.append(peak_event)
 
@@ -392,7 +435,9 @@ class CognitionModule(ModuleInterface):
             parser_version=self.version,
         )
 
-    def _compute_peak_cognition_hour(self, db: Database, baseline_days: int) -> Event | None:
+    def _compute_peak_cognition_hour(
+        self, db: Database, baseline_days: int, ref_date: str | None = None,
+    ) -> Event | None:
         """Hour of day with best average probe scores (rolling window)."""
         rows = db.execute(
             """
@@ -417,10 +462,13 @@ class CognitionModule(ModuleInterface):
         best_hour = result_set[0][0]
         best_avg_rt = result_set[0][1]
 
-        now_utc = datetime.now(UTC).isoformat()
+        # Deterministic timestamp: use reference date or today at 23:59 UTC
+        if ref_date is None:
+            ref_date = datetime.now(UTC).strftime("%Y-%m-%d")
+        peak_ts = f"{ref_date}T23:59:00+00:00"
         return Event(
-            timestamp_utc=now_utc,
-            timestamp_local=now_utc,
+            timestamp_utc=peak_ts,
+            timestamp_local=peak_ts,
             timezone_offset="-0500",
             source_module="cognition.derived",
             event_type="peak_cognition_hour",
@@ -667,9 +715,25 @@ class CognitionModule(ModuleInterface):
         if not summary:
             return None
 
+        bullets: list[str] = []
+        rt_data = summary.get("cognition.reaction.simple_rt")
+        if rt_data and rt_data["avg"] is not None:
+            bullets.append(f"- Avg reaction time: {rt_data['avg']:.0f} ms")
+        mem_data = summary.get("cognition.memory.digit_span")
+        if mem_data and mem_data["max"] is not None:
+            bullets.append(f"- Working memory span: {mem_data['max']:.0f}")
+        load_data = summary.get("cognition.derived.cognitive_load_index")
+        if load_data and load_data["avg"] is not None:
+            bullets.append(f"- Cognitive load index: {load_data['avg']:.2f}")
+        impair_data = summary.get("cognition.derived.impairment_flag")
+        if impair_data and impair_data["max"] is not None and impair_data["max"] > 0:
+            bullets.append("- Impairment flag: YES")
+
         return {
             "event_counts": summary,
             "total_cognition_events": sum(v["count"] for v in summary.values()),
+            "section_title": "Cognition",
+            "bullets": bullets,
         }
 
 

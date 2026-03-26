@@ -58,7 +58,11 @@ class HypothesisTest:
         r = result["pearson_r"]
         p = result["p_value"]
 
-        if self.direction == "negative" and r < 0 and p < self.threshold or self.direction == "positive" and r > 0 and p < self.threshold or self.direction == "any" and p < self.threshold:
+        if (
+            (self.direction == "negative" and r < 0 and p < self.threshold)
+            or (self.direction == "positive" and r > 0 and p < self.threshold)
+            or (self.direction == "any" and p < self.threshold)
+        ):
             supported = True
 
         return {
@@ -113,6 +117,9 @@ HYPOTHESES = [
         "mind.focus",
         direction="negative",
     ),
+    # direction="positive" because higher sentiment score (more positive news)
+    # correlates with higher mood — the hypothesis NAME describes the inverse
+    # relationship but the DIRECTION describes the correlation sign.
     HypothesisTest(
         "Negative news sentiment predicts lower mood",
         "world.news_sentiment",
@@ -147,13 +154,48 @@ HYPOTHESES = [
 ]
 
 
-def run_all_hypotheses(db, window_days: int = 90) -> list[dict]:
-    """Run all pre-defined hypothesis tests.
+def load_hypotheses(config: dict | None = None) -> list[HypothesisTest]:
+    """Load hypothesis definitions from config, falling back to HYPOTHESES.
+
+    If config contains analysis.hypotheses, builds HypothesisTest instances
+    from those definitions. Otherwise returns the hardcoded HYPOTHESES list.
+    This allows users to add/remove/modify hypotheses via config.yaml.
+    """
+    if config is None:
+        return list(HYPOTHESES)
+
+    analysis = config.get("lifedata", {}).get("analysis", {})
+    hyp_configs = analysis.get("hypotheses", [])
+
+    if not hyp_configs:
+        return list(HYPOTHESES)
+
+    loaded = []
+    for h in hyp_configs:
+        if not h.get("enabled", True):
+            continue
+        loaded.append(
+            HypothesisTest(
+                name=h["name"],
+                metric_a=h["metric_a"],
+                metric_b=h["metric_b"],
+                direction=h.get("direction", "any"),
+                threshold=h.get("threshold", 0.05),
+            )
+        )
+    return loaded
+
+
+def run_all_hypotheses(
+    db, window_days: int = 90, config: dict | None = None,
+) -> list[dict]:
+    """Run all hypothesis tests (from config or hardcoded fallback).
 
     Returns list of results sorted by significance.
     """
+    hypotheses = load_hypotheses(config)
     results = []
-    for h in HYPOTHESES:
+    for h in hypotheses:
         result = h.test(db, window_days)
         results.append(result)
         status = result["status"]

@@ -18,6 +18,14 @@ import pytest
 # Ensure project root is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Load .env if present, and ensure PII_HMAC_KEY is set for tests.
+# This must happen before any module import (social parsers checks at import time).
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=False)
+if not os.environ.get("PII_HMAC_KEY"):
+    os.environ["PII_HMAC_KEY"] = "test-only-hmac-key-not-for-production"
+
 from core.event import Event
 from core.database import Database
 from core.config_schema import (

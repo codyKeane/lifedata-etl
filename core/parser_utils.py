@@ -68,6 +68,9 @@ def safe_parse_rows(
                     continue
 
                 result.total_rows += 1
+                # NOTE: Intentional use of str.split(",") instead of csv.reader.
+                # Tasker-generated CSVs do not use RFC 4180 quoting — fields
+                # never contain commas. See CLAUDE.md Design Rules.
                 fields = line.split(",")
 
                 try:

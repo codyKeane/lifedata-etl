@@ -213,6 +213,222 @@ lifedata:
       - oracle.rng
       - oracle.schumann
 
+    # ────────────────────────────────────────────────────────
+    # Compound anomaly patterns (config-driven)
+    # Each pattern fires when ALL conditions are met on a given day.
+    # Set enabled: false to disable a pattern without deleting it.
+    # ────────────────────────────────────────────────────────
+    patterns:
+      - name: heavy_phone_usage
+        enabled: true
+        description_template: "Low battery ({battery_avg:.0f}%) with high screen unlocks ({screen_events}) — heavy phone usage day"
+        conditions:
+          - metric: device.battery
+            aggregate: AVG
+            operator: "<"
+            threshold: 20
+          - metric: device.screen
+            aggregate: COUNT
+            operator: ">"
+            threshold: 50
+
+      - name: sleep_deprivation_high_stress
+        enabled: true
+        description_template: "Short sleep ({sleep_hours:.1f}h) combined with high stress ({stress_level:.0f}/10) — burnout risk"
+        conditions:
+          - metric: body.derived
+            event_type: sleep_duration
+            operator: "<"
+            threshold: 6.0
+          - metric: mind.stress
+            operator: ">"
+            threshold: 6
+
+      - name: caffeine_late_poor_sleep
+        enabled: true
+        description_template: "Caffeine intake after 14:00 ({late_caffeine_mg:.0f}mg) with poor sleep quality ({sleep_quality:.0f}/10)"
+        conditions:
+          - metric: body.caffeine
+            event_type: intake
+            aggregate: SUM
+            operator: ">"
+            threshold: 0
+            hour_filter: ">= 14"
+          - metric: mind.sleep
+            operator: "<"
+            threshold: 5
+
+      - name: low_mood_social_isolation
+        enabled: true
+        description_template: "Low mood ({mood:.0f}/10) with minimal social interaction (density={social_density:.1f})"
+        conditions:
+          - metric: mind.mood
+            operator: "<"
+            threshold: 4
+          - metric: social.derived
+            event_type: density_score
+            operator: "<"
+            threshold: 10
+
+      - name: high_screen_low_movement
+        enabled: true
+        description_template: "High screen time ({screen_time_min:.0f} min) with low step count ({steps:.0f}) — sedentary day"
+        conditions:
+          - metric: device.derived
+            event_type: screen_time_minutes
+            operator: ">"
+            threshold: 180
+          - metric: body.steps
+            aggregate: SUM
+            operator: "<"
+            threshold: 3000
+
+      - name: cognitive_impairment_sleep_deprivation
+        enabled: true
+        description_template: "High cognitive impairment (CLI={cognitive_load_index:.1f}) after short sleep ({sleep_hours:.1f}h)"
+        conditions:
+          - metric: cognition.derived
+            event_type: cognitive_load_index
+            operator: ">"
+            threshold: 2.0
+          - metric: body.derived
+            event_type: sleep_duration
+            operator: "<"
+            threshold: 6.0
+
+      - name: digital_restlessness_low_mood
+        enabled: true
+        description_template: "Digital restlessness (z={digital_restlessness:.1f}) with low mood ({mood:.0f}/10)"
+        conditions:
+          - metric: behavior.derived
+            event_type: digital_restlessness
+            operator: ">"
+            threshold: 2.0
+          - metric: mind.mood
+            operator: "<"
+            threshold: 4
+
+      - name: schumann_excursion_mood_swing
+        enabled: true
+        description_template: "Schumann resonance deviation ({schumann_mean_hz:.2f} Hz) with wide mood swing (range={mood_range:.0f})"
+        conditions:
+          - metric: oracle.schumann
+            operator: ">"
+            threshold: 8.13
+          - metric: mind.mood
+            aggregate: COUNT
+            operator: ">"
+            threshold: 1
+
+      - name: fragmentation_caffeine_spike
+        enabled: true
+        description_template: "High app fragmentation ({fragmentation_index:.0f}) with heavy caffeine ({caffeine_mg:.0f}mg)"
+        conditions:
+          - metric: behavior.app_switch.derived
+            event_type: fragmentation_index
+            operator: ">"
+            threshold: 50
+          - metric: body.caffeine
+            aggregate: SUM
+            operator: ">"
+            threshold: 300
+
+    # ────────────────────────────────────────────────────────
+    # Hypothesis definitions (config-driven)
+    # Users can add/remove/modify hypotheses without code changes.
+    # ────────────────────────────────────────────────────────
+    hypotheses:
+      - name: "Geomagnetic storms reduce mood"
+        metric_a: environment.geomagnetic
+        metric_b: mind.mood
+        direction: negative
+        threshold: 0.05
+        enabled: true
+
+      - name: "Morning light exposure improves energy"
+        metric_a: environment.hourly
+        metric_b: mind.energy
+        direction: positive
+        enabled: true
+
+      - name: "Afternoon caffeine disrupts sleep"
+        metric_a: body.caffeine
+        metric_b: body.sleep_quality
+        direction: negative
+        enabled: true
+
+      - name: "Social interaction improves next-day mood"
+        metric_a: social.density_score
+        metric_b: mind.mood
+        direction: positive
+        enabled: true
+
+      - name: "High notification volume reduces focus"
+        metric_a: social.notification
+        metric_b: mind.focus
+        direction: negative
+        enabled: true
+
+      # direction=positive: higher sentiment score correlates with higher mood
+      - name: "Negative news sentiment predicts lower mood"
+        metric_a: world.news_sentiment
+        metric_b: mind.mood
+        direction: positive
+        enabled: true
+
+      - name: "Caffeine improves reaction time within 2 hours"
+        metric_a: body.caffeine
+        metric_b: cognition.reaction
+        direction: negative
+        enabled: true
+
+      - name: "Sleep deprivation impairs cognitive load index"
+        metric_a: body.sleep
+        metric_b: cognition.derived
+        direction: negative
+        enabled: true
+
+      - name: "High stress correlates with impaired working memory"
+        metric_a: mind.stress
+        metric_b: cognition.memory
+        direction: negative
+        enabled: true
+
+      - name: "Morning cognition scores predict self-reported productivity"
+        metric_a: cognition.reaction
+        metric_b: mind.focus
+        direction: negative
+        enabled: true
+
+    # ────────────────────────────────────────────────────────
+    # Report configuration
+    # ────────────────────────────────────────────────────────
+    report:
+      trend_metrics:
+        - mind.mood
+        - body.steps
+        - device.derived:screen_time_minutes
+        - cognition.reaction
+      sections:
+        - module: device
+          enabled: true
+        - module: environment
+          enabled: true
+        - module: body
+          enabled: true
+        - module: mind
+          enabled: true
+        - module: social
+          enabled: true
+        - module: cognition
+          enabled: true
+        - module: behavior
+          enabled: true
+        - module: oracle
+          enabled: true
+        - module: world
+          enabled: true
+
   # ──────────────────────────────────────────────────────────
   # Data retention
   # ──────────────────────────────────────────────────────────

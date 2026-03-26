@@ -9,7 +9,7 @@ or invalid thresholds.
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -273,12 +273,65 @@ class ModulesConfig(BaseModel):
 # ── Analysis ────────────────────────────────────────────────────
 
 
+# ── Configurable analysis components ────────────────────────────
+
+
+class PatternCondition(BaseModel):
+    """A single condition within a compound anomaly pattern."""
+
+    metric: str
+    operator: Literal["<", ">", "<=", ">=", "==", "!="] = "<"
+    threshold: float = 0.0
+    aggregate: str = "AVG"
+    event_type: str | None = None
+    hour_filter: str | None = None
+
+
+class AnomalyPattern(BaseModel):
+    """A compound anomaly pattern definition (config-driven)."""
+
+    name: str
+    enabled: bool = True
+    description_template: str = ""
+    conditions: list[PatternCondition] = []
+    parameters: dict[str, Any] = {}
+
+
+class HypothesisConfig(BaseModel):
+    """A hypothesis test definition (config-driven)."""
+
+    name: str
+    metric_a: str
+    metric_b: str
+    direction: Literal["positive", "negative", "any"] = "any"
+    threshold: float = 0.05
+    enabled: bool = True
+    window_days: int = 90
+
+
+class ReportSection(BaseModel):
+    """A report section toggle."""
+
+    module: str
+    enabled: bool = True
+
+
+class ReportConfig(BaseModel):
+    """Report layout configuration."""
+
+    trend_metrics: list[str] = []
+    sections: list[ReportSection] = []
+
+
 class AnalysisConfig(BaseModel):
     correlation_window_days: int = 30
     anomaly_zscore_threshold: float = 2.0
     min_observations: int = 14
     min_confidence_for_correlation: float = 0.5
     weekly_correlation_metrics: list[str] = []
+    patterns: list[AnomalyPattern] = []
+    hypotheses: list[HypothesisConfig] = []
+    report: ReportConfig = ReportConfig()
 
     @field_validator("anomaly_zscore_threshold")
     @classmethod

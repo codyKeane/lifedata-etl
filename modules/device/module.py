@@ -54,6 +54,48 @@ class DeviceModule(ModuleInterface):
             "device.bluetooth",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "device.battery",
+                    "display_name": "Battery Level",
+                    "unit": "%",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "device.screen",
+                    "display_name": "Screen Events",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "device.derived:screen_time_minutes",
+                    "display_name": "Screen Time",
+                    "unit": "min",
+                    "aggregate": "AVG",
+                    "event_type": "screen_time_minutes",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "device.derived:battery_drain_rate",
+                    "display_name": "Battery Drain Rate",
+                    "unit": "%/hr",
+                    "aggregate": "AVG",
+                    "event_type": "battery_drain_rate",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all device CSV files in the raw data tree.
 
@@ -126,8 +168,6 @@ class DeviceModule(ModuleInterface):
           - device.derived/charging_duration: total minutes on charger
           - device.derived/battery_drain_rate: avg %/hour drain (non-charging)
         """
-        now_utc = datetime.now(UTC).isoformat()
-
         if affected_dates is not None:
             # Only recompute for dates that changed this run
             days = sorted(affected_dates)
@@ -146,18 +186,18 @@ class DeviceModule(ModuleInterface):
         all_derived: list[Event] = []
 
         for day in days:
-            day_derived = self._compute_day_metrics(db, day, now_utc)
+            day_derived = self._compute_day_metrics(db, day)
             all_derived.extend(day_derived)
 
         if all_derived:
             inserted, skipped = db.insert_events_for_module("device", all_derived)
             log.info(f"Device derived: {inserted} inserted, {skipped} skipped")
 
-    def _compute_day_metrics(self, db: Database, day: str, now_utc: str) -> list[Event]:
+    def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute all derived metrics for a single day."""
         derived: list[Event] = []
-        # Use noon of the target day as the event timestamp for determinism
-        day_ts = f"{day}T12:00:00-05:00"
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{day}T23:59:00+00:00"
 
         # --- Unlock count ---
         row = db.execute(
@@ -383,6 +423,47 @@ class DeviceModule(ModuleInterface):
                 )
 
         return derived
+
+    def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
+        """Return daily device metrics for report generation."""
+        bullets: list[str] = []
+
+        # Battery range
+        batt = db.conn.execute(
+            """
+            SELECT MIN(value_numeric), MAX(value_numeric), AVG(value_numeric)
+            FROM events
+            WHERE source_module = ?
+              AND date(timestamp_local) = ?
+              AND value_numeric IS NOT NULL
+            """,
+            ["device.battery", date_str],
+        ).fetchone()
+        if batt and batt[0] is not None:
+            bullets.append(
+                f"- Battery range: {batt[0]:.0f}% \u2013 {batt[1]:.0f}% "
+                f"(avg {batt[2]:.0f}%)"
+            )
+
+        # Screen events
+        screen = db.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+            ["device.screen", date_str],
+        ).fetchone()
+        if screen and screen[0]:
+            bullets.append(f"- Screen events: {screen[0]}")
+
+        # Charging events
+        charge = db.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+            ["device.charging", date_str],
+        ).fetchone()
+        if charge and charge[0]:
+            bullets.append(f"- Charging events: {charge[0]}")
+
+        if not bullets:
+            return None
+        return {"section_title": "Device", "bullets": bullets}
 
 
 def create_module(config: dict[str, Any] | None = None) -> DeviceModule:

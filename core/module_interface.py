@@ -85,6 +85,21 @@ class ModuleInterface(ABC):
         """Optional: return a dict of daily metrics for this module."""
         return None
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Declare this module's metrics for the analysis layer.
+
+        Returns a dict with:
+            metrics: list of metric declarations, each containing:
+                name: str — source_module value (e.g., "device.battery")
+                display_name: str — human-readable label
+                unit: str — unit of measurement
+                aggregate: str — default SQL aggregate (AVG, SUM, COUNT)
+                event_type: str | None — optional event_type filter
+                trend_eligible: bool — show in report trends
+                anomaly_eligible: bool — include in z-score detection
+        """
+        return {"metrics": []}
+
     def schema_migrations(self) -> list[str]:
         """Optional: return SQL statements for module-specific tables."""
         return []

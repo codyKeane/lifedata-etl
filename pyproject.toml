@@ -40,5 +40,6 @@ testpaths = ["tests"]
 timeout = 30
 markers = [
     "slow: performance benchmarks (run with: make test-perf)",
+    "integration: tests that call external APIs (run with: make test-integration)",
 ]
-addopts = "-m 'not slow'"
+addopts = "-m 'not slow and not integration'"

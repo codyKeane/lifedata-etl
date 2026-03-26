@@ -72,6 +72,48 @@ class WorldModule(ModuleInterface):
             "world.gdelt",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "world.news",
+                    "display_name": "News Headlines",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "world.rss",
+                    "display_name": "RSS Articles",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "event_type": None,
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "world.derived:news_sentiment_index",
+                    "display_name": "News Sentiment",
+                    "unit": "score",
+                    "aggregate": "AVG",
+                    "event_type": "news_sentiment_index",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "world.derived:information_entropy",
+                    "display_name": "Topic Diversity",
+                    "unit": "bits",
+                    "aggregate": "AVG",
+                    "event_type": "information_entropy",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find JSON files in raw/api subdirectories."""
         files = []
@@ -135,8 +177,25 @@ class WorldModule(ModuleInterface):
           - world.derived/news_sentiment_index: daily average sentiment
           - world.derived/information_entropy: topic diversity
         """
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
-        derived_events = []
+        # Determine which dates to process
+        if affected_dates:
+            days_to_process = sorted(affected_dates)
+        else:
+            days_to_process = [datetime.now(UTC).strftime("%Y-%m-%d")]
+
+        all_derived: list[Event] = []
+        for today in days_to_process:
+            all_derived.extend(self._compute_day_metrics(db, today))
+
+        if all_derived:
+            inserted, skipped = db.insert_events_for_module("world", all_derived)
+            log.info(f"World derived: {inserted} inserted, {skipped} skipped")
+
+    def _compute_day_metrics(self, db: Database, today: str) -> list[Event]:
+        """Compute all derived world metrics for a single day."""
+        derived_events: list[Event] = []
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{today}T23:59:00+00:00"
 
         # Collect today's headline sentiment values
         rows = db.execute(
@@ -164,15 +223,13 @@ class WorldModule(ModuleInterface):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        now_utc = datetime.now(UTC).isoformat()
-
         # News Sentiment Index (NSI)
         if sentiments:
             nsi = round(sum(sentiments) / len(sentiments), 4)
             derived_events.append(
                 Event(
-                    timestamp_utc=now_utc,
-                    timestamp_local=now_utc,
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
                     timezone_offset="-0500",
                     source_module="world.derived",
                     event_type="news_sentiment_index",
@@ -200,8 +257,8 @@ class WorldModule(ModuleInterface):
 
             derived_events.append(
                 Event(
-                    timestamp_utc=now_utc,
-                    timestamp_local=now_utc,
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
                     timezone_offset="-0500",
                     source_module="world.derived",
                     event_type="information_entropy",
@@ -220,10 +277,7 @@ class WorldModule(ModuleInterface):
                 f"Information entropy: {entropy:.4f} ({len(cat_counts)} categories)"
             )
 
-        # Insert derived events
-        if derived_events:
-            inserted, skipped = db.insert_events_for_module("world", derived_events)
-            log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
+        return derived_events
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily summary metrics for the report generator."""

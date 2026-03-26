@@ -6,6 +6,99 @@ from analysis.anomaly import AnomalyDetector
 from core.event import Event
 
 
+# Config with all 9 compound patterns (matches config.yaml).
+# Pattern tests pass this to AnomalyDetector so the config-driven evaluator runs.
+_PATTERN_CONFIG = {
+    "lifedata": {
+        "analysis": {
+            "patterns": [
+                {
+                    "name": "heavy_phone_usage",
+                    "enabled": True,
+                    "description_template": "Low battery ({device_battery:.0f}%) with high screen unlocks ({device_screen}) — heavy phone usage day",
+                    "conditions": [
+                        {"metric": "device.battery", "aggregate": "AVG", "operator": "<", "threshold": 20},
+                        {"metric": "device.screen", "aggregate": "COUNT", "operator": ">", "threshold": 50},
+                    ],
+                },
+                {
+                    "name": "sleep_deprivation_high_stress",
+                    "enabled": True,
+                    "description_template": "Short sleep with high stress — burnout risk",
+                    "conditions": [
+                        {"metric": "body.derived", "event_type": "sleep_duration", "operator": "<", "threshold": 6.0},
+                        {"metric": "mind.stress", "operator": ">", "threshold": 6},
+                    ],
+                },
+                {
+                    "name": "caffeine_late_poor_sleep",
+                    "enabled": True,
+                    "description_template": "Late caffeine with poor sleep quality",
+                    "conditions": [
+                        {"metric": "body.caffeine", "event_type": "intake", "aggregate": "SUM", "operator": ">", "threshold": 0, "hour_filter": ">= 14"},
+                        {"metric": "mind.sleep", "operator": "<", "threshold": 5},
+                    ],
+                },
+                {
+                    "name": "low_mood_social_isolation",
+                    "enabled": True,
+                    "description_template": "Low mood with minimal social interaction",
+                    "conditions": [
+                        {"metric": "mind.mood", "operator": "<", "threshold": 4},
+                        {"metric": "social.derived", "event_type": "density_score", "operator": "<", "threshold": 10},
+                    ],
+                },
+                {
+                    "name": "high_screen_low_movement",
+                    "enabled": True,
+                    "description_template": "High screen time with low step count — sedentary day",
+                    "conditions": [
+                        {"metric": "device.derived", "event_type": "screen_time_minutes", "operator": ">", "threshold": 180},
+                        {"metric": "body.steps", "aggregate": "SUM", "operator": "<", "threshold": 3000},
+                    ],
+                },
+                {
+                    "name": "cognitive_impairment_sleep_deprivation",
+                    "enabled": True,
+                    "description_template": "High cognitive impairment after short sleep",
+                    "conditions": [
+                        {"metric": "cognition.derived", "event_type": "cognitive_load_index", "operator": ">", "threshold": 2.0},
+                        {"metric": "body.derived", "event_type": "sleep_duration", "operator": "<", "threshold": 6.0},
+                    ],
+                },
+                {
+                    "name": "digital_restlessness_low_mood",
+                    "enabled": True,
+                    "description_template": "Digital restlessness with low mood",
+                    "conditions": [
+                        {"metric": "behavior.derived", "event_type": "digital_restlessness", "operator": ">", "threshold": 2.0},
+                        {"metric": "mind.mood", "operator": "<", "threshold": 4},
+                    ],
+                },
+                {
+                    "name": "schumann_excursion_mood_swing",
+                    "enabled": True,
+                    "description_template": "Schumann resonance deviation with mood swing",
+                    "conditions": [
+                        {"metric": "oracle.schumann", "operator": ">", "threshold": 8.13},
+                        {"metric": "mind.mood", "aggregate": "COUNT", "operator": ">", "threshold": 1},
+                    ],
+                },
+                {
+                    "name": "fragmentation_caffeine_spike",
+                    "enabled": True,
+                    "description_template": "High app fragmentation with heavy caffeine",
+                    "conditions": [
+                        {"metric": "behavior.app_switch.derived", "event_type": "fragmentation_index", "operator": ">", "threshold": 50},
+                        {"metric": "body.caffeine", "aggregate": "SUM", "operator": ">", "threshold": 300},
+                    ],
+                },
+            ],
+        }
+    }
+}
+
+
 # ──────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────
@@ -141,16 +234,16 @@ class TestAnomalyDetectorZScore:
 
 
 class TestPatternAnomalies:
+    """All pattern tests use config-driven evaluation via _PATTERN_CONFIG."""
+
     def test_no_patterns_empty_db(self, db):
-        detector = AnomalyDetector(db)
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
         patterns = detector.check_pattern_anomalies("2026-03-24")
         assert patterns == []
 
     def test_heavy_phone_usage_pattern(self, db):
         """Low battery + high screen events → heavy_phone_usage pattern."""
-        # Insert low battery
         _insert_metric_day(db, "device.battery", "2026-03-24", 15.0)
-        # Insert >50 screen events
         for i in range(55):
             e = Event(
                 timestamp_utc=f"2026-03-24T{8 + (i // 6):02d}:{(i * 10) % 60:02d}:00+00:00",
@@ -162,7 +255,7 @@ class TestPatternAnomalies:
             )
             db.insert_events_for_module("device", [e])
 
-        detector = AnomalyDetector(db)
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
         patterns = detector.check_pattern_anomalies("2026-03-24")
         pattern_names = [p["pattern"] for p in patterns]
         assert "heavy_phone_usage" in pattern_names
@@ -181,12 +274,145 @@ class TestPatternAnomalies:
             )
             db.insert_events_for_module("device", [e])
 
-        detector = AnomalyDetector(db)
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
         patterns = detector.check_pattern_anomalies("2026-03-24")
         for p in patterns:
             assert "pattern" in p
             assert "description" in p
             assert "metrics" in p
+
+    def test_sleep_deprivation_high_stress(self, db):
+        """Short sleep + high stress → sleep_deprivation_high_stress pattern."""
+        _insert_metric_day(db, "body.derived", "2026-03-24", 4.5, event_type="sleep_duration")
+        _insert_metric_day(db, "mind.stress", "2026-03-24", 8.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "sleep_deprivation_high_stress" in names
+
+    def test_sleep_deprivation_not_triggered_when_rested(self, db):
+        """Good sleep + high stress → no burnout pattern."""
+        _insert_metric_day(db, "body.derived", "2026-03-24", 8.0, event_type="sleep_duration")
+        _insert_metric_day(db, "mind.stress", "2026-03-24", 8.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "sleep_deprivation_high_stress" not in names
+
+    def test_caffeine_late_poor_sleep(self, db):
+        """Late caffeine + poor sleep → caffeine_late_poor_sleep pattern."""
+        e = Event(
+            timestamp_utc="2026-03-24T20:00:00+00:00",
+            timestamp_local="2026-03-24T15:00:00-05:00",
+            timezone_offset="-0500",
+            source_module="body.caffeine",
+            event_type="intake",
+            value_numeric=200.0,
+        )
+        db.insert_events_for_module("body", [e])
+        _insert_metric_day(db, "mind.sleep", "2026-03-24", 3.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "caffeine_late_poor_sleep" in names
+
+    def test_low_mood_social_isolation(self, db):
+        """Low mood + low social density → low_mood_social_isolation pattern."""
+        _insert_metric_day(db, "mind.mood", "2026-03-24", 2.0)
+        _insert_metric_day(db, "social.derived", "2026-03-24", 5.0, event_type="density_score")
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "low_mood_social_isolation" in names
+
+    def test_high_screen_low_movement(self, db):
+        """High screen time + low steps → high_screen_low_movement pattern."""
+        _insert_metric_day(db, "device.derived", "2026-03-24", 240.0, event_type="screen_time_minutes")
+        _insert_metric_day(db, "body.steps", "2026-03-24", 1500.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "high_screen_low_movement" in names
+
+    def test_cognitive_impairment_sleep_deprivation(self, db):
+        """High CLI + short sleep → cognitive_impairment_sleep_deprivation pattern."""
+        _insert_metric_day(db, "cognition.derived", "2026-03-24", 3.5, event_type="cognitive_load_index")
+        _insert_metric_day(db, "body.derived", "2026-03-24", 4.0, event_type="sleep_duration")
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "cognitive_impairment_sleep_deprivation" in names
+
+    def test_digital_restlessness_low_mood(self, db):
+        """High restlessness + low mood → digital_restlessness_low_mood pattern."""
+        _insert_metric_day(db, "behavior.derived", "2026-03-24", 3.0, event_type="digital_restlessness")
+        _insert_metric_day(db, "mind.mood", "2026-03-24", 2.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "digital_restlessness_low_mood" in names
+
+    def test_schumann_excursion_mood_swing(self, db):
+        """Schumann deviation + wide mood range → schumann_excursion_mood_swing."""
+        e1 = Event(
+            timestamp_utc="2026-03-24T10:00:00+00:00",
+            timestamp_local="2026-03-24T05:00:00-05:00",
+            timezone_offset="-0500",
+            source_module="oracle.schumann",
+            event_type="measurement",
+            value_numeric=8.5,
+        )
+        db.insert_events_for_module("oracle", [e1])
+        for val, hour in [(2.0, "08"), (9.0, "14"), (5.0, "20")]:
+            e = Event(
+                timestamp_utc=f"2026-03-24T{hour}:00:00+00:00",
+                timestamp_local=f"2026-03-24T{hour}:00:00-05:00",
+                timezone_offset="-0500",
+                source_module="mind.mood",
+                event_type="check_in",
+                value_numeric=val,
+            )
+            db.insert_events_for_module("mind", [e])
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "schumann_excursion_mood_swing" in names
+
+    def test_fragmentation_caffeine_spike(self, db):
+        """High fragmentation + heavy caffeine → fragmentation_caffeine_spike."""
+        _insert_metric_day(
+            db, "behavior.app_switch.derived", "2026-03-24", 75.0,
+            event_type="fragmentation_index",
+        )
+        _insert_metric_day(db, "body.caffeine", "2026-03-24", 400.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "fragmentation_caffeine_spike" in names
+
+    def test_pattern_not_triggered_when_one_metric_missing(self, db):
+        """If only one side of a compound pattern has data, no pattern fires."""
+        _insert_metric_day(db, "mind.mood", "2026-03-24", 2.0)
+
+        detector = AnomalyDetector(db, config=_PATTERN_CONFIG)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        names = [p["pattern"] for p in patterns]
+        assert "low_mood_social_isolation" not in names
+
+    def test_no_config_patterns_returns_empty(self, db):
+        """When no config patterns are defined, returns empty list."""
+        detector = AnomalyDetector(db)
+        patterns = detector.check_pattern_anomalies("2026-03-24")
+        assert patterns == []
 
     def test_describe_static_method(self):
         """Test _describe() produces readable output."""

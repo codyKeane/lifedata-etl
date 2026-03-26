@@ -79,6 +79,56 @@ class BehaviorModule(ModuleInterface):
             "behavior.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Return machine-readable manifest of metrics this module produces."""
+        return {
+            "metrics": [
+                {
+                    "name": "behavior.app_switch",
+                    "display_name": "App Switches",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "behavior.app_switch.derived:fragmentation_index",
+                    "display_name": "App Fragmentation",
+                    "unit": "0-100",
+                    "aggregate": "AVG",
+                    "event_type": "fragmentation_index",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "behavior.steps",
+                    "display_name": "Steps (hourly)",
+                    "unit": "count",
+                    "aggregate": "SUM",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "behavior.derived:digital_restlessness",
+                    "display_name": "Digital Restlessness",
+                    "unit": "z-score",
+                    "aggregate": "AVG",
+                    "event_type": "digital_restlessness",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "behavior.derived:attention_span_estimate",
+                    "display_name": "Attention Span",
+                    "unit": "seconds",
+                    "aggregate": "AVG",
+                    "event_type": "attention_span_estimate",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+            ]
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all behavior-relevant files.
 
@@ -1173,9 +1223,30 @@ class BehaviorModule(ModuleInterface):
         if not summary:
             return None
 
+        bullets: list[str] = []
+        frag_data = summary.get("behavior.app_switch.derived.fragmentation_index")
+        if frag_data and frag_data["avg"] is not None:
+            bullets.append(f"- App fragmentation: {frag_data['avg']:.1f}/100")
+        steps_data = summary.get("behavior.steps.hourly_count")
+        if steps_data:
+            total_steps = steps_data["count"] * (steps_data["avg"] or 0)
+            bullets.append(f"- Daily steps: {total_steps:,.0f}")
+        attn_data = summary.get("behavior.derived.attention_span_estimate")
+        if attn_data and attn_data["avg"] is not None:
+            bullets.append(f"- Attention span: {attn_data['avg']:.0f}s median dwell")
+        restless_data = summary.get("behavior.derived.digital_restlessness")
+        if restless_data and restless_data["avg"] is not None:
+            suffix = " (elevated)" if restless_data["avg"] > 2.0 else ""
+            bullets.append(f"- Digital restlessness: {restless_data['avg']:.1f}\u03c3{suffix}")
+        dream_data = summary.get("behavior.dream.log")
+        if dream_data and dream_data["count"] > 0:
+            bullets.append(f"- Dreams logged: {dream_data['count']}")
+
         return {
             "event_counts": summary,
             "total_behavior_events": sum(v["count"] for v in summary.values()),
+            "section_title": "Behavior",
+            "bullets": bullets,
         }
 
 

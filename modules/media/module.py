@@ -65,6 +65,37 @@ class MediaModule(ModuleInterface):
             "media.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Return machine-readable manifest of metrics this module produces."""
+        return {
+            "metrics": [
+                {
+                    "name": "media.photo",
+                    "display_name": "Photos",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "media.voice",
+                    "display_name": "Voice Memos",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "media.video",
+                    "display_name": "Videos",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+            ]
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find media metadata CSV files in the raw data tree."""
         files = []
@@ -122,7 +153,11 @@ class MediaModule(ModuleInterface):
         """
         from datetime import datetime
 
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        # Determine which dates to process
+        if affected_dates:
+            days_to_process = sorted(affected_dates)
+        else:
+            days_to_process = [datetime.now(UTC).strftime("%Y-%m-%d")]
 
         # Run transcription if configured
         if self._config.get("auto_transcribe", False):
@@ -142,43 +177,45 @@ class MediaModule(ModuleInterface):
                 log.warning(f"Transcription error: {e}")
 
         # Compute daily media frequency metrics
-        now_utc = datetime.now(UTC).isoformat()
-        derived_events = []
+        all_derived: list[Event] = []
+        for process_day in days_to_process:
+            # Deterministic timestamp for derived daily metrics (idempotent hashing)
+            day_ts = f"{process_day}T23:59:00+00:00"
 
-        rows = db.execute(
-            """
-            SELECT source_module, COUNT(*) as cnt
-            FROM events
-            WHERE source_module LIKE 'media.%'
-              AND source_module != 'media.derived'
-              AND date(timestamp_utc) = ?
-            GROUP BY source_module
-            """,
-            (today,),
-        )
-        result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
-        media_counts = {}
-        for row in result_set:
-            media_counts[row[0]] = row[1]
+            rows = db.execute(
+                """
+                SELECT source_module, COUNT(*) as cnt
+                FROM events
+                WHERE source_module LIKE 'media.%'
+                  AND source_module != 'media.derived'
+                  AND date(timestamp_utc) = ?
+                GROUP BY source_module
+                """,
+                (process_day,),
+            )
+            result_set = rows.fetchall() if hasattr(rows, 'fetchall') else rows
+            media_counts = {}
+            for row in result_set:
+                media_counts[row[0]] = row[1]
 
-        total = sum(media_counts.values())
-        if total > 0:
-            derived_events.append(Event(
-                timestamp_utc=now_utc,
-                timestamp_local=now_utc,
-                timezone_offset="-0500",
-                source_module="media.derived",
-                event_type="daily_media_count",
-                value_numeric=float(total),
-                value_json=safe_json(media_counts),
-                confidence=1.0,
-                parser_version=self.version,
-            ))
-            log.info(f"Media today: {total} items ({media_counts})")
+            total = sum(media_counts.values())
+            if total > 0:
+                all_derived.append(Event(
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
+                    timezone_offset="-0500",
+                    source_module="media.derived",
+                    event_type="daily_media_count",
+                    value_numeric=float(total),
+                    value_json=safe_json(media_counts),
+                    confidence=1.0,
+                    parser_version=self.version,
+                ))
+                log.info(f"Media {process_day}: {total} items ({media_counts})")
 
-        if derived_events:
-            inserted, skipped = db.insert_events_for_module("media", derived_events)
-            log.info(f"Derived metrics: {inserted} inserted, {skipped} skipped")
+        if all_derived:
+            inserted, skipped = db.insert_events_for_module("media", all_derived)
+            log.info(f"Media derived: {inserted} inserted, {skipped} skipped")
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Return daily media metrics for report generation."""
@@ -206,6 +243,8 @@ class MediaModule(ModuleInterface):
         return {
             "event_counts": summary,
             "total_media_events": sum(v["count"] for v in summary.values()),
+            "section_title": "Media",
+            "bullets": [],
         }
 
 

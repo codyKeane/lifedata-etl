@@ -60,6 +60,57 @@ class MindModule(ModuleInterface):
             "mind.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        return {
+            "metrics": [
+                {
+                    "name": "mind.mood",
+                    "display_name": "Mood",
+                    "unit": "1-10",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "mind.energy",
+                    "display_name": "Energy",
+                    "unit": "1-10",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "mind.stress",
+                    "display_name": "Stress",
+                    "unit": "1-10",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "mind.focus",
+                    "display_name": "Focus",
+                    "unit": "1-10",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "mind.sleep",
+                    "display_name": "Sleep Quality",
+                    "unit": "1-10",
+                    "aggregate": "AVG",
+                    "event_type": None,
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+            ],
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all morning/evening check-in CSV files in the raw data tree.
 
@@ -142,7 +193,8 @@ class MindModule(ModuleInterface):
     def _compute_day_metrics(self, db: Database, day: str) -> list[Event]:
         """Compute derived mind metrics for a single day."""
         derived: list[Event] = []
-        day_ts = f"{day}T12:00:00-05:00"
+        # Deterministic timestamp for derived daily metrics (idempotent hashing)
+        day_ts = f"{day}T23:59:00+00:00"
 
         # --- Subjective day score ---
         # Weighted composite of available ratings for the day.
@@ -336,7 +388,11 @@ class MindModule(ModuleInterface):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        return summary if summary else None
+        if not summary:
+            return None
+        summary["section_title"] = "Mind"
+        summary["bullets"] = []
+        return summary
 
 
 def create_module(config: dict[str, Any] | None = None) -> MindModule:

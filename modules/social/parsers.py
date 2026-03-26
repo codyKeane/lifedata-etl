@@ -26,13 +26,16 @@ log = get_logger("lifedata.social.parsers")
 DEFAULT_TZ_OFFSET = "-0500"
 PARSER_VERSION = "1.0.0"
 
-# Per-installation HMAC key for PII hashing. Uses PII_HMAC_KEY from .env if
-# available, otherwise falls back to a machine-specific key derived from
-# the hostname. This prevents rainbow-table reversal of hashed contacts.
-_PII_HMAC_KEY: bytes = os.environ.get(
-    "PII_HMAC_KEY",
-    f"lifedata-pii-{os.uname().nodename}",
-).encode("utf-8")
+# Per-installation HMAC key for PII hashing. PII_HMAC_KEY must be set in .env.
+# This prevents rainbow-table reversal of hashed contacts if the DB is exposed.
+_PII_HMAC_KEY_RAW = os.environ.get("PII_HMAC_KEY")
+if not _PII_HMAC_KEY_RAW:
+    raise RuntimeError(
+        "PII_HMAC_KEY environment variable is required but not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\" "
+        "and add it to your .env file."
+    )
+_PII_HMAC_KEY: bytes = _PII_HMAC_KEY_RAW.encode("utf-8")
 
 
 def _hash_contact(name: str) -> str:

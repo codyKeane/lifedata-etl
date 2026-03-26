@@ -80,6 +80,46 @@ class OracleModule(ModuleInterface):
             "oracle.planetary_hours.derived",
         ]
 
+    def get_metrics_manifest(self) -> dict[str, Any]:
+        """Return machine-readable manifest of metrics this module produces."""
+        return {
+            "metrics": [
+                {
+                    "name": "oracle.iching",
+                    "display_name": "I Ching Castings",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "oracle.rng",
+                    "display_name": "RNG Samples",
+                    "unit": "count",
+                    "aggregate": "COUNT",
+                    "trend_eligible": False,
+                    "anomaly_eligible": False,
+                },
+                {
+                    "name": "oracle.schumann",
+                    "display_name": "Schumann Resonance",
+                    "unit": "Hz",
+                    "aggregate": "AVG",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
+                },
+                {
+                    "name": "oracle.rng.derived:daily_deviation",
+                    "display_name": "RNG Deviation",
+                    "unit": "z-score",
+                    "aggregate": "AVG",
+                    "event_type": "daily_deviation",
+                    "trend_eligible": False,
+                    "anomaly_eligible": True,
+                },
+            ]
+        }
+
     def discover_files(self, raw_base: str) -> list[str]:
         """Find all oracle data files in spool/oracle and raw/api directories."""
         files = []
@@ -551,9 +591,59 @@ class OracleModule(ModuleInterface):
         if not summary:
             return None
 
+        bullets: list[str] = []
+        iching_data = summary.get("oracle.iching.casting")
+        if iching_data and iching_data["count"] > 0:
+            bullets.append(f"- I Ching castings: {iching_data['count']}")
+
+        # Query RNG daily deviation value_json for z/p values
+        try:
+            rng_rows = db.execute(
+                """
+                SELECT value_json FROM events
+                WHERE source_module = 'oracle.rng.derived'
+                  AND event_type = 'daily_deviation'
+                  AND date(timestamp_utc) = ?
+                ORDER BY timestamp_utc DESC LIMIT 1
+                """,
+                (date_str,),
+            )
+            rng_result = list(rng_rows.fetchall() if hasattr(rng_rows, "fetchall") else rng_rows)
+            if rng_result and rng_result[0][0]:
+                rng_json = json.loads(rng_result[0][0])
+                z = rng_json.get("z")
+                p = rng_json.get("p")
+                if z is not None and p is not None:
+                    bullets.append(f"- RNG deviation: z={z:.2f}, p={p:.3f}")
+        except Exception:
+            pass
+
+        # Query Schumann resonance daily summary for mean Hz
+        try:
+            sch_rows = db.execute(
+                """
+                SELECT value_json FROM events
+                WHERE source_module = 'oracle.schumann.derived'
+                  AND event_type = 'daily_summary'
+                  AND date(timestamp_utc) = ?
+                ORDER BY timestamp_utc DESC LIMIT 1
+                """,
+                (date_str,),
+            )
+            sch_result = list(sch_rows.fetchall() if hasattr(sch_rows, "fetchall") else sch_rows)
+            if sch_result and sch_result[0][0]:
+                sch_json = json.loads(sch_result[0][0])
+                mean = sch_json.get("mean")
+                if mean is not None:
+                    bullets.append(f"- Schumann resonance: {mean:.2f} Hz avg")
+        except Exception:
+            pass
+
         return {
             "event_counts": summary,
             "total_oracle_events": sum(v["count"] for v in summary.values()),
+            "section_title": "Oracle",
+            "bullets": bullets,
         }
 
 
