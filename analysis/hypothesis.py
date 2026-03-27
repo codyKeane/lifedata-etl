@@ -22,6 +22,7 @@ class HypothesisTest:
         metric_b: str,
         direction: str,
         threshold: float = 0.05,
+        lag_days: int = 0,
     ):
         """
         Args:
@@ -30,12 +31,16 @@ class HypothesisTest:
             metric_b: Second metric source_module.
             direction: Expected direction: 'positive', 'negative', or 'any'.
             threshold: p-value significance threshold (default 0.05).
+            lag_days: Number of days to offset metric_b (0-7). When > 0,
+                tests whether metric_a predicts metric_b with a delay
+                (e.g., "afternoon caffeine disrupts next-day sleep").
         """
         self.name = name
         self.metric_a = metric_a
         self.metric_b = metric_b
         self.direction = direction
         self.threshold = threshold
+        self.lag_days = lag_days
 
     def test(self, db, window_days: int = 90) -> dict:
         """Run the hypothesis test against the database.
@@ -44,7 +49,10 @@ class HypothesisTest:
         hypothesis is supported by the data.
         """
         corr = Correlator(db)
-        result = corr.correlate(self.metric_a, self.metric_b, window_days=window_days)
+        result = corr.correlate(
+            self.metric_a, self.metric_b,
+            window_days=window_days, lag_days=self.lag_days,
+        )
 
         if "error" in result:
             return {
@@ -76,99 +84,27 @@ class HypothesisTest:
             "n": result["n"],
             "confidence_tier": result["confidence_tier"],
             "needs_more_data": result["n"] < 30,
+            "lag_days": self.lag_days,
         }
 
     def __repr__(self) -> str:
         return f"HypothesisTest('{self.name}')"
 
 
-# ──────────────────────────────────────────────────────────────
-# Pre-defined hypotheses — the core research questions
-# ──────────────────────────────────────────────────────────────
-
-HYPOTHESES = [
-    HypothesisTest(
-        "Geomagnetic storms reduce mood",
-        "environment.geomagnetic",
-        "mind.mood",
-        direction="negative",
-    ),
-    HypothesisTest(
-        "Morning light exposure improves energy",
-        "environment.hourly",
-        "mind.energy",
-        direction="positive",
-    ),
-    HypothesisTest(
-        "Afternoon caffeine disrupts sleep",
-        "body.caffeine",
-        "body.sleep_quality",
-        direction="negative",
-    ),
-    HypothesisTest(
-        "Social interaction improves next-day mood",
-        "social.density_score",
-        "mind.mood",
-        direction="positive",
-    ),
-    HypothesisTest(
-        "High notification volume reduces focus",
-        "social.notification",
-        "mind.focus",
-        direction="negative",
-    ),
-    # direction="positive" because higher sentiment score (more positive news)
-    # correlates with higher mood — the hypothesis NAME describes the inverse
-    # relationship but the DIRECTION describes the correlation sign.
-    HypothesisTest(
-        "Negative news sentiment predicts lower mood",
-        "world.news_sentiment",
-        "mind.mood",
-        direction="positive",
-    ),
-    # ── Cognition hypotheses ──
-    HypothesisTest(
-        "Caffeine improves reaction time within 2 hours",
-        "body.caffeine",
-        "cognition.reaction",
-        direction="negative",  # lower RT = better, caffeine should reduce RT
-    ),
-    HypothesisTest(
-        "Sleep deprivation impairs cognitive load index",
-        "body.sleep",
-        "cognition.derived",
-        direction="negative",  # less sleep → higher CLI (more impaired)
-    ),
-    HypothesisTest(
-        "High stress correlates with impaired working memory",
-        "mind.stress",
-        "cognition.memory",
-        direction="negative",  # higher stress → lower digit span
-    ),
-    HypothesisTest(
-        "Morning cognition scores predict self-reported productivity",
-        "cognition.reaction",
-        "mind.focus",
-        direction="negative",  # lower RT (better cognition) → higher focus rating
-    ),
-]
-
-
 def load_hypotheses(config: dict | None = None) -> list[HypothesisTest]:
-    """Load hypothesis definitions from config, falling back to HYPOTHESES.
+    """Load hypothesis definitions from config.yaml.
 
-    If config contains analysis.hypotheses, builds HypothesisTest instances
-    from those definitions. Otherwise returns the hardcoded HYPOTHESES list.
-    This allows users to add/remove/modify hypotheses via config.yaml.
+    Config.yaml is the single source of truth for hypotheses.
+    Returns an empty list if no config or no hypotheses are defined.
     """
     if config is None:
-        return list(HYPOTHESES)
+        return []
 
     analysis = config.get("lifedata", {}).get("analysis", {})
     hyp_configs = analysis.get("hypotheses", [])
 
     if not hyp_configs:
-        return list(HYPOTHESES)
+        return []
 
     loaded = []
     for h in hyp_configs:
@@ -181,6 +117,7 @@ def load_hypotheses(config: dict | None = None) -> list[HypothesisTest]:
                 metric_b=h["metric_b"],
                 direction=h.get("direction", "any"),
                 threshold=h.get("threshold", 0.05),
+                lag_days=h.get("lag_days", 0),
             )
         )
     return loaded

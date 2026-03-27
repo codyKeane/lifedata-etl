@@ -6,6 +6,7 @@ Provides JSON-structured file logging (machine-parseable) and human-readable
 console logging. Sanitizes messages to prevent newline injection attacks.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -72,10 +73,8 @@ def setup_logging(
     logger.addHandler(fh)
 
     # Restrict log file permissions — logs may contain sensitive data paths
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(expanded_path, 0o600)
-    except OSError:
-        pass
 
     # Console handler: human-readable
     ch = logging.StreamHandler()

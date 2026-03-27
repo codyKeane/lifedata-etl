@@ -20,7 +20,7 @@ python run_etl.py --monthly-report   # Generate monthly report
 python run_etl.py --status           # Health summary
 python run_etl.py --dry-run          # Parse without writing
 python run_etl.py --module device    # Single module
-make test                            # Run 1024 tests
+make test                            # Run 1291 tests
 ```
 
 ## Principles
@@ -36,8 +36,10 @@ make test                            # Run 1024 tests
 | Document | Purpose |
 |----------|---------|
 | [`USER_GUIDE.md`](USER_GUIDE.md) | How to install, configure, and operate LifeData |
+| [`CHANGELOG.md`](CHANGELOG.md) | Version history and release notes |
 | [`CONDENSED_GOALS.md`](CONDENSED_GOALS.md) | Project status: completed, deferred, and remaining objectives |
 | [`docs/MASTER_WALKTHROUGH.md`](docs/MASTER_WALKTHROUGH.md) | Complete system bible — every moving part documented |
+| [`docs/OPERATIONAL_RUNBOOK.md`](docs/OPERATIONAL_RUNBOOK.md) | Operations, maintenance, backup/recovery procedures |
 | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Security model, attack vectors, mitigations |
 | [`docs/EXAMINATION_REPORT.md`](docs/EXAMINATION_REPORT.md) | Codebase audit findings and implementation status |
 | [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) | Benchmark numbers for regression detection |

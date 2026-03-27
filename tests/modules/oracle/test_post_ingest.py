@@ -590,3 +590,296 @@ class TestActivityByPlanet:
         assert data["Jupiter"]["events_count"] == 0
         assert data["Jupiter"]["mood_avg"] is None
         assert data["Jupiter"]["energy_avg"] is None
+
+    def test_planetary_hours_with_missing_times(self, db):
+        """Planetary hours with empty start/end are skipped gracefully."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        planet_events = [
+            # Missing start/end times
+            _make_event(
+                "oracle.planetary_hours", "current_hour", None,
+                minute_offset=0,
+                value_text="Saturn",
+                value_json=json.dumps({}),  # no start_time/end_time
+            ),
+            _make_event(
+                "oracle.planetary_hours", "current_hour", None,
+                minute_offset=60,
+                value_text="Mercury",
+                value_json=json.dumps({
+                    "start_time": f"{TARGET_DATE}T14:00:00+00:00",
+                    "end_time": f"{TARGET_DATE}T15:00:00+00:00",
+                }),
+            ),
+        ]
+        db.insert_events_for_module("oracle_planetary", planet_events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="oracle.planetary_hours.derived",
+                               event_type="activity_by_planet")
+        assert len(rows) == 1
+        data = json.loads(rows[0]["value_json"])
+        # Saturn has no valid time range -> not in activity
+        assert "Saturn" not in data
+        assert "Mercury" in data
+
+    def test_planetary_hours_all_missing_ranges(self, db):
+        """All planetary hours have empty time ranges => no activity event."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        planet_events = [
+            _make_event(
+                "oracle.planetary_hours", "current_hour", None,
+                minute_offset=0,
+                value_text="Mars",
+                value_json=json.dumps({}),  # no start_time/end_time
+            ),
+        ]
+        db.insert_events_for_module("oracle_planetary", planet_events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="oracle.planetary_hours.derived",
+                               event_type="activity_by_planet")
+        assert len(rows) == 0
+
+    def test_planetary_hours_corrupt_json_in_db(self, db):
+        """Directly inserted corrupt JSON in planetary hours is handled gracefully."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        # Bypass validation by inserting directly via SQL
+        import hashlib
+        import uuid
+        raw_id = hashlib.sha256(b"corrupt_test").hexdigest()[:32]
+        eid = str(uuid.UUID(hex=hashlib.sha256(raw_id.encode()).hexdigest()[:32]))
+        db.conn.execute(
+            """INSERT INTO events (event_id, timestamp_utc, timestamp_local, timezone_offset,
+               source_module, event_type, value_text, value_json, confidence, raw_source_id,
+               created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (eid, f"{TARGET_DATE}T13:00:00+00:00", f"{TARGET_DATE}T08:00:00-05:00",
+             "-0500", "oracle.planetary_hours", "current_hour", "Moon",
+             "{{broken json", 1.0, raw_id, "2026-03-20T00:00:00+00:00"),
+        )
+        # Also insert a valid one so we get an event
+        planet_events = [
+            _make_event(
+                "oracle.planetary_hours", "current_hour", None,
+                minute_offset=120,
+                value_text="Sun",
+                value_json=json.dumps({
+                    "start_time": f"{TARGET_DATE}T15:00:00+00:00",
+                    "end_time": f"{TARGET_DATE}T16:00:00+00:00",
+                }),
+            ),
+        ]
+        db.insert_events_for_module("oracle_planetary", planet_events)
+        db.conn.commit()
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="oracle.planetary_hours.derived",
+                               event_type="activity_by_planet")
+        assert len(rows) == 1
+        data = json.loads(rows[0]["value_json"])
+        # Moon with corrupt JSON should be skipped, Sun should be present
+        assert "Moon" not in data
+        assert "Sun" in data
+
+    def test_energy_events_captured_by_planet(self, db):
+        """Energy events are correctly attributed to planetary hours."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        planet_events = [
+            _make_event(
+                "oracle.planetary_hours", "current_hour", None,
+                minute_offset=0,
+                value_text="Sun",
+                value_json=json.dumps({
+                    "start_time": f"{TARGET_DATE}T13:00:00+00:00",
+                    "end_time": f"{TARGET_DATE}T14:00:00+00:00",
+                }),
+            ),
+        ]
+        db.insert_events_for_module("oracle_planetary", planet_events)
+
+        energy_event = Event(
+            timestamp_utc=f"{TARGET_DATE}T13:30:00+00:00",
+            timestamp_local=f"{TARGET_DATE}T13:30:00+00:00",
+            timezone_offset=TZ_OFFSET,
+            source_module="mind.energy",
+            event_type="energy_check",
+            value_numeric=8.0,
+            confidence=1.0,
+            parser_version="1.0.0",
+        )
+        db.insert_events_for_module("mind", [energy_event])
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="oracle.planetary_hours.derived",
+                               event_type="activity_by_planet")
+        assert len(rows) == 1
+        data = json.loads(rows[0]["value_json"])
+        assert data["Sun"]["events_count"] >= 1
+
+
+# ────────────────────────────────────────────────────────────
+# GetDailySummary
+# ────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """Tests for OracleModule.get_daily_summary() report rendering."""
+
+    def test_summary_with_castings_and_rng(self, db):
+        """Mixed oracle events produce a structured summary."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.iching", "casting", 42.0, minute_offset=0),
+            _make_event("oracle.iching", "casting", 23.0, minute_offset=30),
+            _make_event("oracle.rng", "hardware_sample", 130.0, minute_offset=60),
+            _make_event("oracle.rng", "hardware_sample", 125.0, minute_offset=70),
+            _make_event("oracle.rng", "hardware_sample", 128.0, minute_offset=80),
+        ]
+        db.insert_events_for_module("oracle", events)
+        # Run post_ingest to create derived metrics
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert summary["section_title"] == "Oracle"
+        assert summary["total_oracle_events"] > 0
+        assert "event_counts" in summary
+        assert isinstance(summary["bullets"], list)
+
+    def test_summary_with_schumann(self, db):
+        """Schumann readings produce derived summary that get_daily_summary can reference."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.schumann", "measurement", 7.83, minute_offset=0),
+            _make_event("oracle.schumann", "measurement", 7.90, minute_offset=60),
+        ]
+        db.insert_events_for_module("oracle_schumann", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert summary["total_oracle_events"] > 0
+
+    def test_summary_empty_day(self, db):
+        """No oracle events => None summary."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is None
+
+    def test_iching_bullet_present(self, db):
+        """I Ching castings produce a bullet in summary."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.iching", "casting", 1.0, minute_offset=0),
+            _make_event("oracle.iching", "casting", 2.0, minute_offset=30),
+        ]
+        db.insert_events_for_module("oracle_iching", events)
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        iching_bullets = [b for b in summary["bullets"] if "I Ching" in b]
+        assert len(iching_bullets) >= 1
+
+
+# ────────────────────────────────────────────────────────────
+# TestDisabledMetrics
+# ────────────────────────────────────────────────────────────
+
+
+class TestOracleDisabledMetrics:
+    """Tests that disabled_metrics prevents metric computation."""
+
+    def test_disable_rng_deviation(self, db):
+        """Disabling rng daily_deviation prevents computation."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"].copy()
+        config["disabled_metrics"] = ["oracle.rng.derived:daily_deviation"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.rng", "hardware_sample", 130.0, minute_offset=i * 10)
+            for i in range(5)
+        ]
+        db.insert_events_for_module("oracle_rng", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = db.query_events(source_module="oracle.rng.derived",
+                               event_type="daily_deviation")
+        assert len(rows) == 0
+
+    def test_disable_all_iching_derived(self, db):
+        """Disabling oracle.iching.derived prefix blocks frequency + entropy."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"].copy()
+        config["disabled_metrics"] = ["oracle.iching.derived"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.iching", "casting", float(h), minute_offset=h)
+            for h in range(1, 65)
+        ]
+        db.insert_events_for_module("oracle_iching", events)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        freq_rows = db.query_events(source_module="oracle.iching.derived",
+                                    event_type="hexagram_frequency")
+        entropy_rows = db.query_events(source_module="oracle.iching.derived",
+                                       event_type="entropy_test")
+        assert len(freq_rows) == 0
+        assert len(entropy_rows) == 0
+
+
+# ────────────────────────────────────────────────────────────
+# TestIdempotency
+# ────────────────────────────────────────────────────────────
+
+
+class TestOracleIdempotency:
+    """Verify post_ingest is idempotent (INSERT OR REPLACE)."""
+
+    def test_rerun_same_results(self, db):
+        """Running post_ingest twice produces identical event counts."""
+        config = _oracle_config()["lifedata"]["modules"]["oracle"]
+        mod = create_module(config)
+
+        events = [
+            _make_event("oracle.rng", "hardware_sample", 130.0, minute_offset=i * 10)
+            for i in range(5)
+        ]
+        events.extend([
+            _make_event("oracle.schumann", "measurement", 7.83 + i * 0.02, minute_offset=i * 60)
+            for i in range(3)
+        ])
+        db.insert_events_for_module("oracle", events)
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+        count_1 = db.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module LIKE 'oracle.%derived%'"
+        ).fetchone()[0]
+
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+        count_2 = db.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module LIKE 'oracle.%derived%'"
+        ).fetchone()[0]
+
+        assert count_1 == count_2
+        assert count_1 > 0

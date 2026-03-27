@@ -71,7 +71,9 @@ class ModuleInterface(ABC):
         """
         ...
 
-    def post_ingest(self, db: Database, affected_dates: set[str] | None = None) -> None:
+    def post_ingest(  # noqa: B027
+        self, db: Database, affected_dates: set[str] | None = None,
+    ) -> None:
         """Optional hook: runs after all events are ingested.
 
         Use for materialized views, daily summaries, derived metrics, etc.
@@ -82,7 +84,6 @@ class ModuleInterface(ABC):
                 ingested this run. Modules should limit recomputation to
                 these dates when possible. If None, recompute all.
         """
-        pass
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
         """Optional: return a dict of daily metrics for this module."""

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -35,6 +35,14 @@ class MediaModule(ModuleInterface):
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._parser_registry: dict[str, Any] | None = None
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
@@ -92,6 +100,15 @@ class MediaModule(ModuleInterface):
                     "aggregate": "COUNT",
                     "trend_eligible": False,
                     "anomaly_eligible": False,
+                },
+                {
+                    "name": "media.derived:daily_media_count",
+                    "display_name": "Daily Media Count",
+                    "unit": "count",
+                    "aggregate": "SUM",
+                    "event_type": "daily_media_count",
+                    "trend_eligible": True,
+                    "anomaly_eligible": True,
                 },
             ]
         }
@@ -204,7 +221,7 @@ class MediaModule(ModuleInterface):
                     all_derived.append(Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(process_day),
                         source_module="media.derived",
                         event_type="daily_media_count",
                         value_numeric=float(total),

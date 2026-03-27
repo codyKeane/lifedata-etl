@@ -2,6 +2,48 @@
 
 All notable changes to LifeData will be documented in this file.
 
+## [4.4.0] — 2026-03-26
+
+### Added
+- **Correlations table wired up** — `correlator.persist_matrix()` stores pairwise correlation results in the `correlations` table after each ETL run. Reports hypothesis section and `--trace` now return real data.
+- **Per-metric report inclusion** — `get_daily_summary()` in all modules now respects `disabled_metrics`. Disabled metrics are omitted from report bullets, not just from data collection.
+- **Report YAML frontmatter** — all three report types (daily, weekly, monthly) include machine-parseable YAML frontmatter with type, date, event_count, anomaly_count, and version.
+- **Time-lagged hypothesis testing** — `lag_days` parameter in hypothesis config allows testing delayed effects (e.g., "afternoon caffeine disrupts next-day sleep").
+- **Operational runbook** — `docs/OPERATIONAL_RUNBOOK.md` (372 lines) covering daily ops, backup/recovery, DB maintenance, key rotation, failure scenarios, monitoring checklists.
+- **`requirements.lock`** — full dependency lockfile with exact versions for reproducible builds.
+
+### Added — Testing
+- Additional tests across world, reports, and cognition modules.
+- Flaky `test_concurrent_insert_no_deadlock` stabilized with increased busy timeout.
+
+### Improved
+- **Config-driven timezone offset** — all 10 modules now read `_default_tz_offset` from config instead of hardcoding `-0500`. The orchestrator computes and injects this from the configured timezone.
+- **Registry-based trend metrics** — `reports.py` uses `MetricsRegistry.get_trend_metrics()` as fallback instead of hardcoded metric names. Zero hardcoded `source_module` strings remain in the primary code path.
+- **Media manifest complete** — `media.derived:daily_media_count` added to `get_metrics_manifest()` so `disabled_metrics` validation works correctly.
+- **vaderSentiment replaced** — migrated from unmaintained `vaderSentiment` to `nltk.sentiment.vader`. Zero DeprecationWarnings.
+- **CI Python matrix** — tests run on Python 3.13 and 3.14.
+
+### Improved — Documentation
+- All documents updated with current test count and coverage metrics.
+- `CONDENSED_GOALS.md` — 11 previously "remaining" items reclassified as complete.
+- `HERE_WE_GO_AGAIN.md` — comprehensive full-system audit report.
+
+## [4.3.0] — 2026-03-26
+
+### Added — Testing
+- 139 new tests (1024 → 1163) across 6 modules with targeted coverage improvements.
+- Module coverage gains: behavior 66% → 80%, oracle 66% → 80%, body 63% → 95%, media 49% → 100%, meta 65% → 100%, social 65% → 99%.
+
+### Improved
+- Overall coverage: 77% → 81%. CI floor remains 70%.
+- **WAL checkpoint after ETL** — explicit `PRAGMA wal_checkpoint(TRUNCATE)` at end of each ETL run to prevent unbounded WAL growth.
+- **Event ID caching** — `raw_source_id` and `event_id` computation memoized via property caching, eliminating redundant SHA-256 hashing on re-ingestion of unchanged events.
+
+### Improved — Documentation
+- `USER_GUIDE.md` — updated test count, cron schedule (Sunday midnight weekly report).
+- `docs/MASTER_WALKTHROUGH.md` — added Per-Metric Configurability section, Schema Migrations section, weekly/monthly report CLI flags and cron entries.
+- `docs/PERFORMANCE_BASELINE.md` — re-run baselines (insert throughput improved 42K → 58K events/sec).
+
 ## [4.2.0] — 2026-03-26
 
 ### Added — Configurability

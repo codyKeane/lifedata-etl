@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -52,6 +52,14 @@ class BehaviorModule(ModuleInterface):
 
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     @property
     def module_id(self) -> str:
@@ -344,7 +352,7 @@ class BehaviorModule(ModuleInterface):
                 Event(
                     timestamp_utc=ts,
                     timestamp_local=ts,
-                    timezone_offset="-0500",
+                    timezone_offset=self._tz_offset(date_str),
                     source_module="behavior.app_switch",
                     event_type="hourly_rate",
                     value_numeric=float(cnt),
@@ -359,7 +367,9 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Fragmentation index ────────────────────────────────────
 
-    def _compute_fragmentation_index(self, db: Database, date_str: str, day_ts: str) -> Event | None:
+    def _compute_fragmentation_index(
+        self, db: Database, date_str: str, day_ts: str,
+    ) -> Event | None:
         """0-100 scale of attention fragmentation.
 
         Components:
@@ -435,7 +445,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.app_switch.derived",
             event_type="fragmentation_index",
             value_numeric=frag,
@@ -480,7 +490,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.steps",
             event_type="daily_total",
             value_numeric=float(total_steps),
@@ -545,7 +555,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.steps.derived",
             event_type="movement_entropy",
             value_numeric=norm,
@@ -634,7 +644,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.steps.derived",
             event_type="sedentary_bouts",
             value_numeric=float(len(bouts)),
@@ -679,7 +689,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.unlock",
             event_type="hourly_summary",
             value_numeric=round(mean_lat, 1),
@@ -719,7 +729,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.dream.derived",
             event_type="dream_frequency",
             value_numeric=float(count),
@@ -788,7 +798,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.derived",
             event_type="attention_span_estimate",
             value_numeric=round(median, 1),
@@ -879,7 +889,7 @@ class BehaviorModule(ModuleInterface):
                     return Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="behavior.derived",
                         event_type="morning_inertia_score",
                         value_numeric=round(delta_min, 1),
@@ -918,7 +928,8 @@ class BehaviorModule(ModuleInterface):
             WHERE date(timestamp_utc) = ?
               AND value_numeric IS NOT NULL
               AND (
-                  (source_module = 'behavior.app_switch.derived' AND event_type = 'fragmentation_index')
+                  (source_module = 'behavior.app_switch.derived'
+                   AND event_type = 'fragmentation_index')
                   OR (source_module = 'device.derived' AND event_type = 'screen_time_minutes')
               )
             UNION ALL
@@ -950,7 +961,8 @@ class BehaviorModule(ModuleInterface):
             WHERE value_numeric IS NOT NULL
               AND date(timestamp_utc) BETWEEN date(?, ? || ' days') AND date(?, '-1 day')
               AND (
-                  (source_module = 'behavior.app_switch.derived' AND event_type = 'fragmentation_index')
+                  (source_module = 'behavior.app_switch.derived'
+                   AND event_type = 'fragmentation_index')
                   OR (source_module = 'device.derived' AND event_type = 'screen_time_minutes')
               )
             """,
@@ -1015,7 +1027,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.derived",
             event_type="digital_restlessness",
             value_numeric=round(restlessness, 3),
@@ -1108,7 +1120,7 @@ class BehaviorModule(ModuleInterface):
         return Event(
             timestamp_utc=day_ts,
             timestamp_local=day_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="behavior.derived",
             event_type="behavioral_consistency",
             value_numeric=round(rmse, 2),
@@ -1128,7 +1140,9 @@ class BehaviorModule(ModuleInterface):
 
     # ─── Helper methods ─────────────────────────────────────────
 
-    def _get_today_metric(self, db: Database, date_str: str, source_module: str, event_type: str) -> float | None:
+    def _get_today_metric(
+        self, db: Database, date_str: str, source_module: str, event_type: str,
+    ) -> float | None:
         """Get today's value for a specific derived metric."""
         rows = db.execute(
             """
@@ -1204,7 +1218,10 @@ class BehaviorModule(ModuleInterface):
         return float((today_count - mean_c) / std_c)
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily behavior metrics for report generation."""
+        """Return daily behavior metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         rows = db.execute(
             """
             SELECT source_module, event_type, COUNT(*) as cnt,
@@ -1235,23 +1252,28 @@ class BehaviorModule(ModuleInterface):
             return None
 
         bullets: list[str] = []
-        frag_data = summary.get("behavior.app_switch.derived.fragmentation_index")
-        if frag_data and frag_data["avg"] is not None:
-            bullets.append(f"- App fragmentation: {frag_data['avg']:.1f}/100")
-        steps_data = summary.get("behavior.steps.hourly_count")
-        if steps_data:
-            total_steps = steps_data["count"] * (steps_data["avg"] or 0)
-            bullets.append(f"- Daily steps: {total_steps:,.0f}")
-        attn_data = summary.get("behavior.derived.attention_span_estimate")
-        if attn_data and attn_data["avg"] is not None:
-            bullets.append(f"- Attention span: {attn_data['avg']:.0f}s median dwell")
-        restless_data = summary.get("behavior.derived.digital_restlessness")
-        if restless_data and restless_data["avg"] is not None:
-            suffix = " (elevated)" if restless_data["avg"] > 2.0 else ""
-            bullets.append(f"- Digital restlessness: {restless_data['avg']:.1f}\u03c3{suffix}")
-        dream_data = summary.get("behavior.dream.log")
-        if dream_data and dream_data["count"] > 0:
-            bullets.append(f"- Dreams logged: {dream_data['count']}")
+        if self.is_metric_enabled("behavior.app_switch.derived:fragmentation_index"):
+            frag_data = summary.get("behavior.app_switch.derived.fragmentation_index")
+            if frag_data and frag_data["avg"] is not None:
+                bullets.append(f"- App fragmentation: {frag_data['avg']:.1f}/100")
+        if self.is_metric_enabled("behavior.steps"):
+            steps_data = summary.get("behavior.steps.hourly_count")
+            if steps_data:
+                total_steps = steps_data["count"] * (steps_data["avg"] or 0)
+                bullets.append(f"- Daily steps: {total_steps:,.0f}")
+        if self.is_metric_enabled("behavior.derived:attention_span_estimate"):
+            attn_data = summary.get("behavior.derived.attention_span_estimate")
+            if attn_data and attn_data["avg"] is not None:
+                bullets.append(f"- Attention span: {attn_data['avg']:.0f}s median dwell")
+        if self.is_metric_enabled("behavior.derived:digital_restlessness"):
+            restless_data = summary.get("behavior.derived.digital_restlessness")
+            if restless_data and restless_data["avg"] is not None:
+                suffix = " (elevated)" if restless_data["avg"] > 2.0 else ""
+                bullets.append(f"- Digital restlessness: {restless_data['avg']:.1f}\u03c3{suffix}")
+        if self.is_metric_enabled("behavior.dream"):
+            dream_data = summary.get("behavior.dream.log")
+            if dream_data and dream_data["count"] > 0:
+                bullets.append(f"- Dreams logged: {dream_data['count']}")
 
         return {
             "event_counts": summary,

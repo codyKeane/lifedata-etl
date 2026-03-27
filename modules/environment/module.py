@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 from modules.environment.parsers import PARSER_REGISTRY
 
 if TYPE_CHECKING:
@@ -28,6 +28,14 @@ class EnvironmentModule(ModuleInterface):
 
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     @property
     def module_id(self) -> str:
@@ -138,7 +146,8 @@ class EnvironmentModule(ModuleInterface):
         Only recomputes for dates that had events ingested this run.
 
         Derived metrics per day:
-          - environment.derived/daily_weather_composite: temp range, avg humidity, avg temp, avg pressure
+          - environment.derived/daily_weather_composite: temp range, avg humidity, avg temp,
+            avg pressure
           - environment.derived/location_diversity: unique locations at ~111m resolution
           - environment.derived/astro_summary: moon phase and illumination
         """
@@ -231,7 +240,7 @@ class EnvironmentModule(ModuleInterface):
                         Event(
                             timestamp_utc=day_ts,
                             timestamp_local=day_ts,
-                            timezone_offset="-0500",
+                            timezone_offset=self._tz_offset(day),
                             source_module="environment.derived",
                             event_type="daily_weather_composite",
                             value_numeric=avg_temp,
@@ -274,7 +283,7 @@ class EnvironmentModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="environment.derived",
                         event_type="location_diversity",
                         value_numeric=float(unique_count),
@@ -319,7 +328,7 @@ class EnvironmentModule(ModuleInterface):
                         Event(
                             timestamp_utc=day_ts,
                             timestamp_local=day_ts,
-                            timezone_offset="-0500",
+                            timezone_offset=self._tz_offset(day),
                             source_module="environment.derived",
                             event_type="astro_summary",
                             value_numeric=moon_illumination,
@@ -342,31 +351,36 @@ class EnvironmentModule(ModuleInterface):
         return derived
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily environment metrics for report generation."""
+        """Return daily environment metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         bullets: list[str] = []
 
-        temp = db.conn.execute(
-            """
-            SELECT AVG(value_numeric), MIN(value_numeric), MAX(value_numeric)
-            FROM events
-            WHERE source_module = ?
-              AND date(timestamp_local) = ?
-              AND value_numeric IS NOT NULL
-            """,
-            ["environment.hourly", date_str],
-        ).fetchone()
-        if temp and temp[0] is not None:
-            bullets.append(
-                f"- Temperature: {temp[1]:.0f}\u00b0F \u2013 {temp[2]:.0f}\u00b0F "
-                f"(avg {temp[0]:.0f}\u00b0F)"
-            )
+        if self.is_metric_enabled("environment.hourly"):
+            temp = db.conn.execute(
+                """
+                SELECT AVG(value_numeric), MIN(value_numeric), MAX(value_numeric)
+                FROM events
+                WHERE source_module = ?
+                  AND date(timestamp_local) = ?
+                  AND value_numeric IS NOT NULL
+                """,
+                ["environment.hourly", date_str],
+            ).fetchone()
+            if temp and temp[0] is not None:
+                bullets.append(
+                    f"- Temperature: {temp[1]:.0f}\u00b0F \u2013 {temp[2]:.0f}\u00b0F "
+                    f"(avg {temp[0]:.0f}\u00b0F)"
+                )
 
-        loc = db.conn.execute(
-            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
-            ["environment.location", date_str],
-        ).fetchone()
-        if loc and loc[0]:
-            bullets.append(f"- Location fixes: {loc[0]}")
+        if self.is_metric_enabled("environment.location"):
+            loc = db.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+                ["environment.location", date_str],
+            ).fetchone()
+            if loc and loc[0]:
+                bullets.append(f"- Location fixes: {loc[0]}")
 
         if not bullets:
             return None

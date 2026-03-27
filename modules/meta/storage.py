@@ -8,6 +8,7 @@ retention policies for raw files and logs.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import time
@@ -38,10 +39,8 @@ def get_dir_size(path: str) -> int:
     for dirpath, _dirnames, filenames in os.walk(expanded):
         for f in filenames:
             fp = os.path.join(dirpath, f)
-            try:
+            with contextlib.suppress(OSError):
                 total += os.path.getsize(fp)
-            except OSError:
-                pass
     return total
 
 

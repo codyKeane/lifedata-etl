@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 
 import requests
 from dotenv import load_dotenv
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 from scripts._http import retry_get
 

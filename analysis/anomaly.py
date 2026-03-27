@@ -6,6 +6,7 @@ Flags unusual events using z-score analysis against rolling baselines.
 Also detects multi-variable pattern anomalies (burnout signals, caffeine-sleep).
 """
 
+import contextlib
 import statistics
 from datetime import UTC, datetime, timedelta
 
@@ -244,10 +245,8 @@ class AnomalyDetector:
 
             if all_met:
                 desc = pattern.get("description_template", pattern["name"])
-                try:
+                with contextlib.suppress(KeyError, ValueError):
                     desc = desc.format(**metric_values)
-                except (KeyError, ValueError):
-                    pass  # Use template as-is if formatting fails
 
                 triggered.append({
                     "pattern": pattern["name"],

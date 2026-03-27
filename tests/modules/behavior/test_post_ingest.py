@@ -6,6 +6,7 @@ Each test class covers one metric family with edge cases.
 """
 
 import json
+import math
 
 import pytest
 
@@ -714,3 +715,504 @@ class TestPostIngestIntegration:
 
         assert count_1 == count_2
         assert count_1 > 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestUnlockSummary
+# ──────────────────────────────────────────────────────────────
+
+
+def _unlock_event(hour: int, minute: int, latency_ms: float) -> Event:
+    """Create an unlock latency event."""
+    return Event(
+        timestamp_utc=_utc(hour, minute),
+        timestamp_local=_local(hour, minute),
+        timezone_offset="-0500",
+        source_module="behavior.unlock",
+        event_type="latency",
+        value_numeric=latency_ms,
+        confidence=1.0,
+        parser_version="1.0.0",
+    )
+
+
+def _dream_event(hour: int, event_type: str = "quick_capture", text: str = "A dream") -> Event:
+    """Create a dream log event."""
+    return Event(
+        timestamp_utc=_utc(hour),
+        timestamp_local=_local(hour),
+        timezone_offset="-0500",
+        source_module="behavior.dream",
+        event_type=event_type,
+        value_text=text,
+        confidence=1.0,
+        parser_version="1.0.0",
+    )
+
+
+class TestUnlockSummary:
+    """Tests for behavior.unlock / hourly_summary."""
+
+    def test_summary_computed(self, db):
+        """Multiple unlock events produce a summary with correct stats."""
+        mod = _make_module()
+        events = [
+            _unlock_event(8, 0, 500.0),
+            _unlock_event(9, 0, 300.0),
+            _unlock_event(10, 0, 700.0),
+            _unlock_event(11, 0, 400.0),
+            _unlock_event(12, 0, 600.0),
+        ]
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.unlock", "hourly_summary")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        assert r["value_numeric"] == pytest.approx(500.0, abs=1.0)
+        data = json.loads(r["value_json"])
+        assert data["n_unlocks"] == 5
+        assert data["fastest_ms"] == pytest.approx(300.0, abs=1.0)
+        assert data["slowest_ms"] == pytest.approx(700.0, abs=1.0)
+        assert data["std_ms"] > 0
+
+    def test_single_unlock(self, db):
+        """A single unlock produces a summary with std=0."""
+        mod = _make_module()
+        events = [_unlock_event(9, 0, 450.0)]
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.unlock", "hourly_summary")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        data = json.loads(r["value_json"])
+        assert data["n_unlocks"] == 1
+        assert data["std_ms"] == 0
+
+    def test_no_unlocks_no_event(self, db):
+        """No unlock events => no summary."""
+        mod = _make_module()
+        db.insert_events_for_module("behavior", [_step_event(10, 500)])
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.unlock", "hourly_summary")
+        assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDreamFrequency
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDreamFrequency:
+    """Tests for behavior.dream.derived / dream_frequency."""
+
+    def test_rolling_count(self, db):
+        """Dream events across 7 days produce a rolling count."""
+        mod = _make_module()
+        events = []
+        for day_offset in range(7):
+            d = f"2026-03-{20 - day_offset:02d}"
+            events.append(Event(
+                timestamp_utc=f"{d}T07:00:00+00:00",
+                timestamp_local=f"{d}T02:00:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.dream",
+                event_type="quick_capture",
+                value_text=f"Dream on {d}",
+                confidence=1.0,
+                parser_version="1.0.0",
+            ))
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.dream.derived", "dream_frequency")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        assert r["value_numeric"] == 7.0
+        data = json.loads(r["value_json"])
+        assert data["dreams_7d"] == 7
+
+    def test_structured_recall_counted(self, db):
+        """structured_recall events are included in dream frequency."""
+        mod = _make_module()
+        events = [
+            Event(
+                timestamp_utc=f"{DATE}T07:00:00+00:00",
+                timestamp_local=f"{DATE}T02:00:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.dream",
+                event_type="structured_recall",
+                value_text="Detailed dream recall",
+                confidence=1.0,
+                parser_version="1.0.0",
+            )
+        ]
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.dream.derived", "dream_frequency")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        assert r["value_numeric"] == 1.0
+
+    def test_no_dreams_no_event(self, db):
+        """No dream events => no frequency event."""
+        mod = _make_module()
+        db.insert_events_for_module("behavior", [_step_event(10, 500)])
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.dream.derived", "dream_frequency")
+        assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDigitalRestlessnessWithBaseline
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDigitalRestlessnessWithBaseline:
+    """Tests for digital_restlessness with sufficient baseline data."""
+
+    def _insert_baseline(self, db, n_days=10):
+        """Insert N days of baseline fragmentation + unlock + screen time data."""
+        events = []
+        for day_offset in range(1, n_days + 1):
+            d = f"2026-03-{20 - day_offset:02d}"
+            # Baseline fragmentation: ~50
+            events.append(Event(
+                timestamp_utc=f"{d}T23:59:00+00:00",
+                timestamp_local=f"{d}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.app_switch.derived",
+                event_type="fragmentation_index",
+                value_numeric=50.0 + day_offset * 0.5,  # slight variation
+                confidence=0.8,
+                parser_version="1.0.0",
+            ))
+            # Baseline screen time: ~120 min
+            events.append(Event(
+                timestamp_utc=f"{d}T23:59:00+00:00",
+                timestamp_local=f"{d}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="device.derived",
+                event_type="screen_time_minutes",
+                value_numeric=120.0 + day_offset * 2.0,
+                confidence=0.8,
+                parser_version="1.0.0",
+            ))
+            # Baseline unlocks: 5 per day
+            for h in range(5):
+                events.append(Event(
+                    timestamp_utc=f"{d}T{8 + h:02d}:00:00+00:00",
+                    timestamp_local=f"{d}T{3 + h:02d}:00:00-05:00",
+                    timezone_offset="-0500",
+                    source_module="behavior.unlock",
+                    event_type="latency",
+                    value_numeric=400.0,
+                    confidence=1.0,
+                    parser_version="1.0.0",
+                ))
+        return events
+
+    def test_normal_day_low_restlessness(self, db):
+        """A day close to baseline produces low z-score restlessness."""
+        mod = _make_module()
+        baseline = self._insert_baseline(db, n_days=10)
+
+        # Today's values close to baseline means
+        today_events = [
+            Event(
+                timestamp_utc=f"{DATE}T23:59:00+00:00",
+                timestamp_local=f"{DATE}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.app_switch.derived",
+                event_type="fragmentation_index",
+                value_numeric=52.0,
+                confidence=0.8,
+                parser_version="1.0.0",
+            ),
+            Event(
+                timestamp_utc=f"{DATE}T23:59:00+00:00",
+                timestamp_local=f"{DATE}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="device.derived",
+                event_type="screen_time_minutes",
+                value_numeric=125.0,
+                confidence=0.8,
+                parser_version="1.0.0",
+            ),
+        ]
+        # Today's unlocks similar to baseline
+        for h in range(5):
+            today_events.append(Event(
+                timestamp_utc=f"{DATE}T{8 + h:02d}:00:00+00:00",
+                timestamp_local=f"{DATE}T{3 + h:02d}:00:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.unlock",
+                event_type="latency",
+                value_numeric=400.0,
+                confidence=1.0,
+                parser_version="1.0.0",
+            ))
+
+        db.insert_events_for_module("behavior", baseline + today_events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.derived", "digital_restlessness")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        # Close to baseline => low absolute z-score
+        assert abs(r["value_numeric"]) < 2.0
+        data = json.loads(r["value_json"])
+        assert data["n_components"] >= 2
+
+    def test_elevated_day_high_restlessness(self, db):
+        """A day well above baseline produces high restlessness z-score."""
+        mod = _make_module()
+        baseline = self._insert_baseline(db, n_days=10)
+
+        # Today's values far above baseline
+        today_events = [
+            Event(
+                timestamp_utc=f"{DATE}T23:59:00+00:00",
+                timestamp_local=f"{DATE}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.app_switch.derived",
+                event_type="fragmentation_index",
+                value_numeric=95.0,  # way above ~55 baseline
+                confidence=0.8,
+                parser_version="1.0.0",
+            ),
+            Event(
+                timestamp_utc=f"{DATE}T23:59:00+00:00",
+                timestamp_local=f"{DATE}T18:59:00-05:00",
+                timezone_offset="-0500",
+                source_module="device.derived",
+                event_type="screen_time_minutes",
+                value_numeric=300.0,  # way above ~130 baseline
+                confidence=0.8,
+                parser_version="1.0.0",
+            ),
+        ]
+        # Many more unlocks than baseline (20 vs ~5)
+        for h in range(20):
+            today_events.append(Event(
+                timestamp_utc=f"{DATE}T{6 + h // 3:02d}:{(h * 15) % 60:02d}:00+00:00",
+                timestamp_local=f"{DATE}T{1 + h // 3:02d}:{(h * 15) % 60:02d}:00-05:00",
+                timezone_offset="-0500",
+                source_module="behavior.unlock",
+                event_type="latency",
+                value_numeric=400.0,
+                confidence=1.0,
+                parser_version="1.0.0",
+            ))
+
+        db.insert_events_for_module("behavior", baseline + today_events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.derived", "digital_restlessness")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        assert r["value_numeric"] > 1.0, f"Expected elevated restlessness, got {r['value_numeric']}"
+
+
+# ──────────────────────────────────────────────────────────────
+# TestBehavioralConsistencyWithBaseline
+# ──────────────────────────────────────────────────────────────
+
+
+class TestBehavioralConsistencyWithBaseline:
+    """Tests for behavioral_consistency with sufficient baseline data."""
+
+    def _insert_baseline_transitions(self, db, n_days=10):
+        """Insert N days of baseline app transitions with consistent hourly profile."""
+        events = []
+        for day_offset in range(1, n_days + 1):
+            d = f"2026-03-{20 - day_offset:02d}"
+            # Consistent pattern: 5 transitions per hour during 9-17
+            for h in range(9, 17):
+                for m in range(5):
+                    events.append(Event(
+                        timestamp_utc=f"{d}T{h:02d}:{m * 10:02d}:00+00:00",
+                        timestamp_local=f"{d}T{h - 5:02d}:{m * 10:02d}:00-05:00",
+                        timezone_offset="-0500",
+                        source_module="behavior.app_switch",
+                        event_type="transition",
+                        value_json=json.dumps({
+                            "from_app": "com.a",
+                            "to_app": "com.b",
+                            "dwell_sec": 120,
+                        }),
+                        confidence=1.0,
+                        parser_version="1.0.0",
+                    ))
+        return events
+
+    def test_consistent_day_low_rmse(self, db):
+        """A day matching the baseline pattern produces low RMSE."""
+        mod = _make_module()
+        baseline = self._insert_baseline_transitions(db, n_days=10)
+
+        # Today's pattern matches baseline: 5 transitions per hour, 9-17
+        today_events = []
+        for h in range(9, 17):
+            for m in range(5):
+                today_events.append(_app_transition(
+                    hour=h, minute=m * 10,
+                    from_app="com.a", to_app="com.b", dwell_sec=120,
+                ))
+
+        db.insert_events_for_module("behavior", baseline + today_events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.derived", "behavioral_consistency")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        # Consistent pattern => low RMSE
+        assert r["value_numeric"] < 3.0, f"Expected low RMSE, got {r['value_numeric']}"
+
+    def test_erratic_day_high_rmse(self, db):
+        """A day with very different hourly pattern produces high RMSE."""
+        mod = _make_module()
+        baseline = self._insert_baseline_transitions(db, n_days=10)
+
+        # Today: 50 transitions concentrated in hour 22 (normally 0 at night)
+        today_events = []
+        for m in range(50):
+            today_events.append(_app_transition(
+                hour=22, minute=m % 60,
+                from_app=f"com.a{m}", to_app=f"com.b{m}", dwell_sec=30,
+            ))
+
+        db.insert_events_for_module("behavior", baseline + today_events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.derived", "behavioral_consistency")
+        assert len(rows) == 1
+        r = _row_to_dict(db, rows[0])
+        assert r["value_numeric"] > 5.0, f"Expected high RMSE, got {r['value_numeric']}"
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGetDailySummary
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """Tests for get_daily_summary() report generation."""
+
+    def test_summary_with_mixed_events(self, db):
+        """A day with various behavior events produces a structured summary."""
+        mod = _make_module()
+        events = []
+
+        # App transitions
+        for i in range(10):
+            events.append(_app_transition(
+                hour=9 + i // 4, minute=(i * 10) % 60,
+                from_app="com.a", to_app="com.b", dwell_sec=120,
+            ))
+        # Steps
+        for h in range(6, 18):
+            events.append(_step_event(h, 500))
+        # Unlocks
+        for h in range(8, 12):
+            events.append(_unlock_event(h, 0, 400.0))
+
+        db.insert_events_for_module("behavior", events)
+        # Run post_ingest to create derived metrics
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        assert summary["section_title"] == "Behavior"
+        assert summary["total_behavior_events"] > 0
+        assert "event_counts" in summary
+        assert isinstance(summary["bullets"], list)
+
+    def test_summary_empty_day(self, db):
+        """No behavior events => None summary."""
+        mod = _make_module()
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is None
+
+    def test_summary_with_fragmentation_bullet(self, db):
+        """When fragmentation is computed, it appears in bullets."""
+        mod = _make_module()
+        events = []
+        apps = [f"com.app{i}" for i in range(10)]
+        for i in range(20):
+            events.append(_app_transition(
+                hour=9 + (i * 5) // 60, minute=(i * 5) % 60,
+                from_app=apps[i % 10], to_app=apps[(i + 1) % 10], dwell_sec=30,
+            ))
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        # Fragmentation bullet should be present
+        frag_bullets = [b for b in summary["bullets"] if "fragmentation" in b.lower()]
+        assert len(frag_bullets) >= 1
+
+    def test_summary_with_steps_bullet(self, db):
+        """Step data produces a steps bullet in summary."""
+        mod = _make_module()
+        events = [_step_event(h, 1000) for h in range(6, 18)]
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        step_bullets = [b for b in summary["bullets"] if "steps" in b.lower()]
+        assert len(step_bullets) >= 1
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDisabledMetrics
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDisabledMetrics:
+    """Tests that disabled_metrics prevents derived metric computation."""
+
+    def test_disable_fragmentation(self, db):
+        """Disabling fragmentation_index prevents its computation."""
+        cfg = CONFIG["lifedata"]["modules"]["behavior"].copy()
+        cfg["disabled_metrics"] = ["behavior.app_switch.derived:fragmentation_index"]
+        mod = create_module(cfg)
+
+        events = []
+        apps = [f"com.app{i}" for i in range(10)]
+        for i in range(20):
+            events.append(_app_transition(
+                hour=9 + (i * 5) // 60, minute=(i * 5) % 60,
+                from_app=apps[i % 10], to_app=apps[(i + 1) % 10], dwell_sec=30,
+            ))
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "behavior.app_switch.derived", "fragmentation_index")
+        assert len(rows) == 0
+
+    def test_disable_all_derived_by_prefix(self, db):
+        """Disabling 'behavior.derived' prefix disables all behavior.derived:* metrics."""
+        cfg = CONFIG["lifedata"]["modules"]["behavior"].copy()
+        cfg["disabled_metrics"] = ["behavior.derived"]
+        mod = create_module(cfg)
+
+        events = [_step_event(h, 500) for h in range(6, 18)]
+        events.append(_screen_on(7, 0))
+        for i in range(10):
+            events.append(_app_transition(
+                hour=9 + i // 4, minute=(i * 10) % 60,
+                from_app="com.a", to_app="com.editor", dwell_sec=200,
+            ))
+        db.insert_events_for_module("behavior", events)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        # behavior.derived:attention_span_estimate, morning_inertia_score, etc. all blocked
+        rows = _query_derived(db, "behavior.derived", None)
+        assert len(rows) == 0

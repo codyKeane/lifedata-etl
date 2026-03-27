@@ -209,18 +209,18 @@ class TestLoadHypothesesFromConfig:
         assert len(hyps) == 1
         assert hyps[0].name == "h1"
 
-    def test_no_config_returns_hardcoded(self):
-        from analysis.hypothesis import load_hypotheses, HYPOTHESES
+    def test_no_config_returns_empty(self):
+        from analysis.hypothesis import load_hypotheses
 
         hyps = load_hypotheses(None)
-        assert len(hyps) == len(HYPOTHESES)
+        assert hyps == []
 
-    def test_empty_hypotheses_returns_hardcoded(self):
-        from analysis.hypothesis import load_hypotheses, HYPOTHESES
+    def test_empty_hypotheses_returns_empty(self):
+        from analysis.hypothesis import load_hypotheses
 
         config = {"lifedata": {"analysis": {"hypotheses": []}}}
         hyps = load_hypotheses(config)
-        assert len(hyps) == len(HYPOTHESES)
+        assert hyps == []
 
 
 class TestConfigDrivenPatterns:

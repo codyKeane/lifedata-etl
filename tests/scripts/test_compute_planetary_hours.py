@@ -1,8 +1,12 @@
-"""Tests for scripts/compute_planetary_hours.py — planetary hours calculator."""
+"""Tests for scripts/compute_planetary_hours.py — planetary hours calculator,
+including main() execution, file I/O, load_config, and edge cases."""
 
+import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -14,6 +18,8 @@ from compute_planetary_hours import (
     CHALDEAN_ORDER,
     DAY_RULERS,
     compute_planetary_hours,
+    load_config,
+    main,
 )
 
 # Known dates for deterministic testing
@@ -123,3 +129,145 @@ class TestChaldeanOrderCycles:
             assert h["ruling_planet"] == expected_planet, (
                 f"Hour {i}: expected {expected_planet}, got {h['ruling_planet']}"
             )
+
+
+# ──────────────────────────────────────────────────────────────
+# All weekday rulers
+# ──────────────────────────────────────────────────────────────
+
+
+class TestAllDayRulers:
+    """Test planetary hour first-hour ruler for every day of the week."""
+
+    @pytest.mark.parametrize(
+        "date,expected_ruler",
+        [
+            (datetime(2026, 3, 16), "Moon"),      # Monday
+            (datetime(2026, 3, 17), "Mars"),      # Tuesday
+            (datetime(2026, 3, 19), "Jupiter"),   # Thursday
+            (datetime(2026, 3, 20), "Venus"),     # Friday
+            (datetime(2026, 3, 21), "Saturn"),    # Saturday
+        ],
+    )
+    def test_day_ruler(self, date, expected_ruler):
+        hours = compute_planetary_hours(LAT, LON, date)
+        assert hours[0]["ruling_planet"] == expected_ruler
+
+
+# ──────────────────────────────────────────────────────────────
+# load_config
+# ──────────────────────────────────────────────────────────────
+
+
+class TestLoadConfig:
+    def test_loads_real_config(self):
+        """load_config() should return a dict with lifedata key."""
+        config = load_config()
+        assert isinstance(config, dict)
+        assert "lifedata" in config
+
+    def test_loads_timezone(self):
+        config = load_config()
+        tz = config.get("lifedata", {}).get("timezone", "")
+        assert tz  # Non-empty timezone
+
+
+# ──────────────────────────────────────────────────────────────
+# main() — full execution path
+# ──────────────────────────────────────────────────────────────
+
+
+class TestMain:
+    def test_main_creates_output_file(self, tmp_path):
+        """main() should create a hours_YYYY-MM-DD.json file."""
+        import compute_planetary_hours as cph
+
+        config = {
+            "lifedata": {
+                "timezone": "America/Chicago",
+                "modules": {
+                    "oracle": {"home_lat": LAT, "home_lon": LON},
+                },
+            },
+        }
+
+        with patch.object(cph, "OUTPUT_DIR", str(tmp_path)):
+            with patch.object(cph, "load_config", return_value=config):
+                main()
+
+        # Should have created exactly one JSON file
+        json_files = list(tmp_path.glob("hours_*.json"))
+        assert len(json_files) == 1
+
+        data = json.loads(json_files[0].read_text())
+        assert "date" in data
+        assert "day_ruler" in data
+        assert "hours" in data
+        assert len(data["hours"]) == 24
+
+    def test_main_warns_zero_coordinates(self, tmp_path, capsys):
+        """main() should warn when lat/lon are 0.0 (not configured)."""
+        import compute_planetary_hours as cph
+
+        config = {
+            "lifedata": {
+                "timezone": "UTC",
+                "modules": {
+                    "oracle": {"home_lat": 0.0, "home_lon": 0.0},
+                },
+            },
+        }
+
+        with patch.object(cph, "OUTPUT_DIR", str(tmp_path)):
+            with patch.object(cph, "load_config", return_value=config):
+                main()
+
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "home_lat" in captured.out
+
+    def test_main_default_coordinates(self, tmp_path):
+        """main() should use defaults when oracle config is missing."""
+        import compute_planetary_hours as cph
+
+        config = {
+            "lifedata": {
+                "timezone": "UTC",
+                "modules": {},
+            },
+        }
+
+        with patch.object(cph, "OUTPUT_DIR", str(tmp_path)):
+            with patch.object(cph, "load_config", return_value=config):
+                main()
+
+        json_files = list(tmp_path.glob("hours_*.json"))
+        assert len(json_files) == 1
+
+
+# ──────────────────────────────────────────────────────────────
+# High latitude — extreme day/night durations
+# ──────────────────────────────────────────────────────────────
+
+
+class TestHighLatitude:
+    def test_high_latitude_computes(self):
+        """Planetary hours should compute even at high latitudes (e.g. Oslo)."""
+        # Summer solstice in Oslo — very long days
+        date = datetime(2026, 6, 21)
+        hours = compute_planetary_hours(59.9139, 10.7522, date, "Europe/Oslo")
+        assert len(hours) == 24
+        # Day hours should be much longer than night hours
+        day_dur = hours[0]["duration_minutes"]
+        night_dur = hours[12]["duration_minutes"]
+        assert day_dur > night_dur
+
+    def test_southern_hemisphere(self):
+        """Winter in southern hemisphere — short days."""
+        date = datetime(2026, 6, 21)
+        hours = compute_planetary_hours(-33.8688, 151.2093, date, "Australia/Sydney")
+        assert len(hours) == 24
+        # Winter — night hours longer than day hours
+        day_dur = hours[0]["duration_minutes"]
+        night_dur = hours[12]["duration_minutes"]
+        assert night_dur > day_dur

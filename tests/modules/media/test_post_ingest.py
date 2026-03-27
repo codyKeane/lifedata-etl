@@ -329,3 +329,316 @@ class TestMediaDisabledMetrics:
         rows = db.query_events(source_module="media.derived",
                                event_type="daily_media_count")
         assert len(rows) == 0
+
+
+# ────────────────────────────────────────────────────────────
+# Properties and Factory
+# ────────────────────────────────────────────────────────────
+
+
+class TestMediaModuleProperties:
+    """Cover module_id, display_name, source_types, version, get_metrics_manifest."""
+
+    def test_module_id(self):
+        mod = create_module(_media_config())
+        assert mod.module_id == "media"
+
+    def test_display_name(self):
+        mod = create_module(_media_config())
+        assert mod.display_name == "Media Module"
+
+    def test_version(self):
+        mod = create_module(_media_config())
+        assert mod.version == "1.0.0"
+
+    def test_source_types(self):
+        mod = create_module(_media_config())
+        types = mod.source_types
+        assert "media.voice" in types
+        assert "media.photo" in types
+        assert "media.video" in types
+        assert "media.derived" in types
+
+    def test_get_metrics_manifest(self):
+        mod = create_module(_media_config())
+        manifest = mod.get_metrics_manifest()
+        assert "metrics" in manifest
+        names = [m["name"] for m in manifest["metrics"]]
+        assert "media.photo" in names
+        assert "media.voice" in names
+        assert "media.video" in names
+
+    def test_create_module_factory_no_config(self):
+        """create_module with None config does not crash."""
+        from modules.media.module import create_module as factory_fn
+        mod = factory_fn(None)
+        assert mod.module_id == "media"
+
+    def test_create_module_factory_with_config(self):
+        from modules.media.module import create_module as factory_fn
+        mod = factory_fn({"enabled": True})
+        assert mod.module_id == "media"
+
+
+# ────────────────────────────────────────────────────────────
+# get_daily_summary
+# ────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """Cover get_daily_summary method."""
+
+    def test_summary_with_media_events(self, db):
+        """Returns summary dict when media events exist for the day."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.photo", "capture", value_text="img1.jpg",
+                        minute_offset=0),
+            _make_event("media.photo", "capture", value_text="img2.jpg",
+                        minute_offset=5),
+            _make_event("media.voice", "recording", value_text="memo.wav",
+                        minute_offset=10),
+        ]
+        db.insert_events_for_module("media_summary", events)
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert "event_counts" in summary
+        assert summary["total_media_events"] == 3
+        assert summary["section_title"] == "Media"
+        assert isinstance(summary["bullets"], list)
+
+    def test_summary_no_media_events(self, db):
+        """Returns None when no media events exist for the day."""
+        mod = create_module(_media_config())
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is None
+
+    def test_summary_event_type_keys(self, db):
+        """event_counts keys are source_module.event_type combos."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.video", "clip", value_text="vid.mp4",
+                        minute_offset=0),
+        ]
+        db.insert_events_for_module("media_vid", events)
+
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert "media.video.clip" in summary["event_counts"]
+        assert summary["event_counts"]["media.video.clip"]["count"] == 1
+
+    def test_summary_different_date_returns_none(self, db):
+        """Events on a different date are not included."""
+        mod = create_module(_media_config())
+
+        events = [
+            _make_event("media.photo", "capture", value_text="img.jpg",
+                        minute_offset=0),
+        ]
+        db.insert_events_for_module("media_photo", events)
+
+        # Query a different date
+        summary = mod.get_daily_summary(db, "2026-03-21")
+        assert summary is None
+
+
+# ────────────────────────────────────────────────────────────
+# discover_files and parse
+# ────────────────────────────────────────────────────────────
+
+
+class TestDiscoverFilesAndParse:
+    """Cover discover_files and parse dispatch logic."""
+
+    def test_discover_files_empty_dir(self, tmp_path):
+        """Returns empty list when directory has no matching CSVs."""
+        mod = create_module(_media_config())
+        files = mod.discover_files(str(tmp_path))
+        assert files == []
+
+    def test_discover_files_finds_voice_meta(self, tmp_path):
+        """Discovers voice_meta_*.csv in media/voice subdir."""
+        mod = create_module(_media_config())
+        voice_dir = tmp_path / "media" / "voice"
+        voice_dir.mkdir(parents=True)
+        csv_file = voice_dir / "voice_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,memo1,30,home\n")
+
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 1
+        assert "voice_meta_2026-03-20.csv" in files[0]
+
+    def test_discover_files_finds_photo_meta(self, tmp_path):
+        """Discovers photo_meta_*.csv in media/photos subdir."""
+        mod = create_module(_media_config())
+        photo_dir = tmp_path / "media" / "photos"
+        photo_dir.mkdir(parents=True)
+        csv_file = photo_dir / "photo_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,pic1,Landscape,park\n")
+
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 1
+
+    def test_discover_files_finds_video_meta(self, tmp_path):
+        """Discovers video_meta_*.csv in media/video subdir."""
+        mod = create_module(_media_config())
+        video_dir = tmp_path / "media" / "video"
+        video_dir.mkdir(parents=True)
+        csv_file = video_dir / "video_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,clip1,walk\n")
+
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 1
+
+    def test_discover_files_ignores_non_matching_csv(self, tmp_path):
+        """Non-matching CSV files in media dirs are ignored."""
+        mod = create_module(_media_config())
+        media_dir = tmp_path / "media"
+        media_dir.mkdir(parents=True)
+        (media_dir / "random_data.csv").write_text("foo,bar\n")
+
+        files = mod.discover_files(str(tmp_path))
+        assert files == []
+
+    def test_discover_files_deduplicates(self, tmp_path):
+        """Symlinks or duplicate paths produce deduplicated results."""
+        mod = create_module(_media_config())
+        voice_dir = tmp_path / "media" / "voice"
+        voice_dir.mkdir(parents=True)
+        csv_file = voice_dir / "voice_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,memo1,30,home\n")
+
+        # Also place in logs/media/voice pointing to same file via symlink
+        logs_voice_dir = tmp_path / "logs" / "media" / "voice"
+        logs_voice_dir.mkdir(parents=True)
+        link = logs_voice_dir / "voice_meta_2026-03-20.csv"
+        link.symlink_to(csv_file)
+
+        files = mod.discover_files(str(tmp_path))
+        # Should deduplicate to just 1 file (same realpath)
+        assert len(files) == 1
+
+    def test_parse_voice_meta_csv(self, tmp_path):
+        """parse() dispatches voice_meta CSV to correct parser."""
+        mod = create_module(_media_config())
+        csv_file = tmp_path / "voice_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,memo1,30,home\n")
+
+        events = mod.parse(str(csv_file))
+        assert len(events) == 1
+        assert events[0].source_module == "media.voice"
+
+    def test_parse_photo_meta_csv(self, tmp_path):
+        """parse() dispatches photo_meta CSV to correct parser."""
+        mod = create_module(_media_config())
+        csv_file = tmp_path / "photo_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,pic1,Landscape,park\n")
+
+        events = mod.parse(str(csv_file))
+        assert len(events) == 1
+        assert events[0].source_module == "media.photo"
+
+    def test_parse_video_meta_csv(self, tmp_path):
+        """parse() dispatches video_meta CSV to correct parser."""
+        mod = create_module(_media_config())
+        csv_file = tmp_path / "video_meta_2026-03-20.csv"
+        csv_file.write_text("1742475600,08:00,clip1,walk\n")
+
+        events = mod.parse(str(csv_file))
+        assert len(events) == 1
+        assert events[0].source_module == "media.video"
+
+    def test_parse_unknown_file_returns_empty(self, tmp_path):
+        """parse() returns empty list for unknown file prefix."""
+        mod = create_module(_media_config())
+        csv_file = tmp_path / "unknown_data_2026.csv"
+        csv_file.write_text("1742475600,something\n")
+
+        events = mod.parse(str(csv_file))
+        assert events == []
+
+    def test_parse_empty_csv_returns_empty(self, tmp_path):
+        """parse() returns empty list for empty voice_meta CSV."""
+        mod = create_module(_media_config())
+        csv_file = tmp_path / "voice_meta_empty.csv"
+        csv_file.write_text("")
+
+        events = mod.parse(str(csv_file))
+        assert events == []
+
+
+# ────────────────────────────────────────────────────────────
+# post_ingest edge cases
+# ────────────────────────────────────────────────────────────
+
+
+class TestPostIngestEdgeCases:
+    """Cover post_ingest edge cases: no affected_dates, transcription error."""
+
+    def test_post_ingest_no_affected_dates_uses_today(self, db):
+        """When affected_dates is None, post_ingest uses today's date."""
+        mod = create_module(_media_config())
+        # No events for today, so no derived event — but code path is exercised
+        mod.post_ingest(db, affected_dates=None)
+
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 0
+
+    def test_post_ingest_transcription_import_error(self, db):
+        """Transcription import failure is handled gracefully."""
+        mod = create_module(_media_config(auto_transcribe=True))
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav"),
+        ]
+        db.insert_events_for_module("media_voice", events)
+
+        with unittest.mock.patch.dict(
+            "sys.modules",
+            {"modules.media.transcribe": None}
+        ):
+            # Should not raise — import error is caught
+            mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+    def test_post_ingest_transcription_whisper_available_and_transcribes(self, db):
+        """When whisper is available and auto_transcribe=True, transcribe_pending is called."""
+        mod = create_module(_media_config(auto_transcribe=True))
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav"),
+        ]
+        db.insert_events_for_module("media_voice", events)
+
+        with unittest.mock.patch(
+            "modules.media.transcribe.is_whisper_available", return_value=True
+        ), unittest.mock.patch(
+            "modules.media.transcribe.transcribe_pending", return_value=["file1.wav"]
+        ) as mock_transcribe:
+            mod.post_ingest(db, affected_dates={TARGET_DATE})
+            mock_transcribe.assert_called_once()
+
+    def test_post_ingest_transcription_exception_handled(self, db):
+        """Exception during transcription is caught and logged."""
+        mod = create_module(_media_config(auto_transcribe=True))
+
+        events = [
+            _make_event("media.voice", "recording", value_text="memo.wav"),
+        ]
+        db.insert_events_for_module("media_voice", events)
+
+        with unittest.mock.patch(
+            "modules.media.transcribe.is_whisper_available",
+            side_effect=RuntimeError("test error"),
+        ):
+            # Should not raise
+            mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        # Derived metric should still be computed
+        rows = db.query_events(source_module="media.derived",
+                               event_type="daily_media_count")
+        assert len(rows) == 1

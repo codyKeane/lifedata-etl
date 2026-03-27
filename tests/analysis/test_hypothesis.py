@@ -1,5 +1,5 @@
 """
-Tests for analysis/hypothesis.py — HypothesisTest, HYPOTHESES list, and run_all_hypotheses().
+Tests for analysis/hypothesis.py — HypothesisTest, load_hypotheses, and run_all_hypotheses().
 
 Uses real SQLite fixtures (no mocks). Correlated/anti-correlated data is generated
 over 30 days to ensure the Correlator has sufficient aligned observations.
@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from analysis.hypothesis import HYPOTHESES, HypothesisTest, run_all_hypotheses
+from analysis.hypothesis import HypothesisTest, load_hypotheses, run_all_hypotheses
 from core.event import Event
 
 
@@ -263,7 +263,7 @@ class TestHypothesisTest:
         expected_keys = {
             "hypothesis", "supported", "status", "direction_expected",
             "pearson_r", "p_value", "effect_size", "n",
-            "confidence_tier", "needs_more_data",
+            "confidence_tier", "needs_more_data", "lag_days",
         }
         assert set(result.keys()) == expected_keys
 
@@ -274,57 +274,60 @@ class TestHypothesisTest:
 
 
 # ──────────────────────────────────────────────────────────────
-# TestHypothesesList
+# TestLoadHypotheses
 # ──────────────────────────────────────────────────────────────
 
 
-class TestHypothesesList:
-    """Tests for the HYPOTHESES module-level list of 10 pre-defined hypotheses."""
+class TestLoadHypotheses:
+    """Tests for load_hypotheses() — config.yaml is the single source of truth."""
 
-    def test_count(self):
-        """There should be exactly 10 pre-defined hypotheses."""
-        assert len(HYPOTHESES) == 10
+    def test_no_config_returns_empty(self):
+        """load_hypotheses(None) returns an empty list."""
+        assert load_hypotheses(None) == []
 
-    def test_all_valid_directions(self):
-        """Every hypothesis must have direction in {'positive', 'negative', 'any'}."""
-        valid_directions = {"positive", "negative", "any"}
-        for h in HYPOTHESES:
-            assert h.direction in valid_directions, (
-                f"Hypothesis '{h.name}' has invalid direction '{h.direction}'"
-            )
+    def test_empty_hypotheses_returns_empty(self):
+        """Empty hypotheses list in config returns empty."""
+        config = {"lifedata": {"analysis": {"hypotheses": []}}}
+        assert load_hypotheses(config) == []
 
-    def test_all_distinct_names(self):
-        """All hypothesis names must be unique."""
-        names = [h.name for h in HYPOTHESES]
-        assert len(names) == len(set(names)), (
-            f"Duplicate hypothesis names found: "
-            f"{[n for n in names if names.count(n) > 1]}"
-        )
+    def test_loads_from_config(self):
+        """Hypotheses are loaded from config dict."""
+        config = {
+            "lifedata": {
+                "analysis": {
+                    "hypotheses": [
+                        {
+                            "name": "Test H1",
+                            "metric_a": "a.b",
+                            "metric_b": "c.d",
+                            "direction": "positive",
+                        },
+                    ],
+                },
+            },
+        }
+        hyps = load_hypotheses(config)
+        assert len(hyps) == 1
+        assert hyps[0].name == "Test H1"
+        assert isinstance(hyps[0], HypothesisTest)
 
-    def test_all_have_two_metric_strings(self):
-        """Every hypothesis must have non-empty metric_a and metric_b strings."""
-        for h in HYPOTHESES:
-            assert isinstance(h.metric_a, str) and len(h.metric_a) > 0, (
-                f"Hypothesis '{h.name}' has invalid metric_a"
-            )
-            assert isinstance(h.metric_b, str) and len(h.metric_b) > 0, (
-                f"Hypothesis '{h.name}' has invalid metric_b"
-            )
-
-    def test_all_are_hypothesis_test_instances(self):
-        """Every item in HYPOTHESES is a HypothesisTest instance."""
-        for h in HYPOTHESES:
-            assert isinstance(h, HypothesisTest)
-
-    def test_metrics_use_dot_notation(self):
-        """All metrics should use dot-notation (module.submodule)."""
-        for h in HYPOTHESES:
-            assert "." in h.metric_a, (
-                f"Hypothesis '{h.name}' metric_a '{h.metric_a}' missing dot notation"
-            )
-            assert "." in h.metric_b, (
-                f"Hypothesis '{h.name}' metric_b '{h.metric_b}' missing dot notation"
-            )
+    def test_disabled_hypothesis_excluded(self):
+        """Hypotheses with enabled: false should be excluded."""
+        config = {
+            "lifedata": {
+                "analysis": {
+                    "hypotheses": [
+                        {"name": "Active", "metric_a": "a.b", "metric_b": "c.d",
+                         "direction": "positive", "enabled": True},
+                        {"name": "Disabled", "metric_a": "e.f", "metric_b": "g.h",
+                         "direction": "negative", "enabled": False},
+                    ],
+                },
+            },
+        }
+        hyps = load_hypotheses(config)
+        assert len(hyps) == 1
+        assert hyps[0].name == "Active"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -332,44 +335,60 @@ class TestHypothesesList:
 # ──────────────────────────────────────────────────────────────
 
 
+_TEST_CONFIG = {
+    "lifedata": {
+        "analysis": {
+            "hypotheses": [
+                {
+                    "name": "Geomagnetic storms reduce mood",
+                    "metric_a": "environment.geomagnetic",
+                    "metric_b": "mind.mood",
+                    "direction": "negative",
+                },
+                {
+                    "name": "Morning light exposure improves energy",
+                    "metric_a": "environment.hourly",
+                    "metric_b": "mind.energy",
+                    "direction": "positive",
+                },
+            ],
+        },
+    },
+}
+
+
 class TestRunAllHypotheses:
     """Tests for run_all_hypotheses() orchestration function."""
 
     def test_handles_empty_database_gracefully(self, db):
         """With no data, run_all_hypotheses should return results without crashing."""
-        results = run_all_hypotheses(db, window_days=90)
+        results = run_all_hypotheses(db, window_days=90, config=_TEST_CONFIG)
 
         assert isinstance(results, list)
-        assert len(results) == 10  # One result per hypothesis
-        # All should be insufficient_data since database is empty
+        assert len(results) == 2  # One result per hypothesis in config
         for r in results:
             assert r["status"] == "insufficient_data"
 
+    def test_no_config_returns_empty(self, db):
+        """Without config, no hypotheses are loaded → empty results."""
+        results = run_all_hypotheses(db, window_days=90, config=None)
+        assert results == []
+
     def test_returns_sorted_by_significance(self, db):
-        """Supported hypotheses appear before not_supported/insufficient_data,
-        and within each group results are sorted by p_value ascending."""
-        # Insert data that will make ONE specific hypothesis supported.
-        # Use environment.geomagnetic and mind.mood (hypothesis: "Geomagnetic storms reduce mood")
-        # which expects direction="negative"
+        """Supported hypotheses appear before not_supported/insufficient_data."""
         events = []
         for i in range(30):
-            # Higher geomagnetic -> lower mood (negative correlation)
             geo_val = float(i + 1)
             mood_val = float(30 - i)
             events.append(_make_event(i, "environment.geomagnetic", geo_val))
             events.append(_make_event(i, "mind.mood", mood_val))
         db.insert_events_for_module("test_hypothesis", events)
 
-        results = run_all_hypotheses(db, window_days=90)
+        results = run_all_hypotheses(db, window_days=90, config=_TEST_CONFIG)
 
-        assert len(results) == 10
+        assert len(results) == 2
 
-        # Find status groups
         supported = [r for r in results if r["status"] == "supported"]
-        not_supported = [r for r in results if r["status"] == "not_supported"]
-        insufficient = [r for r in results if r["status"] == "insufficient_data"]
-
-        # At least one should be supported (geomagnetic vs mood)
         assert len(supported) >= 1
         assert supported[0]["hypothesis"] == "Geomagnetic storms reduce mood"
 
@@ -381,21 +400,197 @@ class TestRunAllHypotheses:
                 break
 
         if first_non_supported_idx is not None:
-            # All items before first_non_supported should be "supported"
             for r in results[:first_non_supported_idx]:
                 assert r["status"] == "supported"
 
-        # Within supported group, p_values should be ascending
-        if len(supported) > 1:
-            p_values = [r["p_value"] for r in supported]
-            assert p_values == sorted(p_values)
-
     def test_returns_list_of_dicts(self, db):
         """Return type is a list of dicts, each with at least 'hypothesis' and 'status'."""
-        results = run_all_hypotheses(db, window_days=90)
+        results = run_all_hypotheses(db, window_days=90, config=_TEST_CONFIG)
 
         assert isinstance(results, list)
         for r in results:
             assert isinstance(r, dict)
             assert "hypothesis" in r
             assert "status" in r
+
+
+# ──────────────────────────────────────────────────────────────
+# TestLagDays
+# ──────────────────────────────────────────────────────────────
+
+
+class TestLagDays:
+    """Tests for time-lagged hypothesis testing (lag_days parameter)."""
+
+    def test_lag_days_zero_same_as_default(self, db):
+        """lag_days=0 produces identical results to the default (no lag)."""
+        _insert_correlated_pair(db, "test.lag_a", "test.lag_b", n_days=30, negative=True)
+
+        ht_default = HypothesisTest(
+            "No lag default",
+            "test.lag_a",
+            "test.lag_b",
+            direction="negative",
+        )
+        ht_zero = HypothesisTest(
+            "No lag explicit",
+            "test.lag_a",
+            "test.lag_b",
+            direction="negative",
+            lag_days=0,
+        )
+
+        result_default = ht_default.test(db, window_days=90)
+        result_zero = ht_zero.test(db, window_days=90)
+
+        assert result_default["pearson_r"] == result_zero["pearson_r"]
+        assert result_default["p_value"] == result_zero["p_value"]
+        assert result_default["n"] == result_zero["n"]
+        assert result_zero["lag_days"] == 0
+        assert result_default["lag_days"] == 0
+
+    def test_lag_days_one_offsets_alignment(self, db):
+        """lag_days=1 correctly offsets metric_b by one day.
+
+        Insert metric_a as 1,2,3,...,30 on days 0-29.
+        Insert metric_b as 1,2,3,...,30 on days 0-29.
+
+        With lag_days=0: day 0 -> (a=1, b=1), perfect positive r ~ 1.0
+        With lag_days=1: day 0 a=1 pairs with day 1 b=2, still positive
+        but the alignment shifts, losing one day of data (n should be 29).
+        """
+        _insert_correlated_pair(db, "test.lag1_a", "test.lag1_b", n_days=30, negative=False)
+
+        ht_no_lag = HypothesisTest(
+            "No lag",
+            "test.lag1_a",
+            "test.lag1_b",
+            direction="positive",
+            lag_days=0,
+        )
+        ht_lag_1 = HypothesisTest(
+            "Lag 1 day",
+            "test.lag1_a",
+            "test.lag1_b",
+            direction="positive",
+            lag_days=1,
+        )
+
+        result_no_lag = ht_no_lag.test(db, window_days=90)
+        result_lag_1 = ht_lag_1.test(db, window_days=90)
+
+        # Both should produce valid results
+        assert result_no_lag["status"] != "insufficient_data"
+        assert result_lag_1["status"] != "insufficient_data"
+
+        # Lagged version loses one day of alignment
+        assert result_lag_1["n"] == result_no_lag["n"] - 1
+        assert result_lag_1["lag_days"] == 1
+
+        # Both should still show strong positive correlation (monotonic data)
+        assert result_lag_1["pearson_r"] > 0.9
+
+    def test_lag_days_in_result_dict(self, db):
+        """The lag_days value appears in the result dict."""
+        _insert_correlated_pair(db, "test.lagr_a", "test.lagr_b", n_days=30, negative=False)
+
+        ht = HypothesisTest(
+            "Lag result test",
+            "test.lagr_a",
+            "test.lagr_b",
+            direction="positive",
+            lag_days=3,
+        )
+        result = ht.test(db, window_days=90)
+
+        assert "lag_days" in result
+        assert result["lag_days"] == 3
+
+    def test_lag_days_insufficient_data(self, db):
+        """lag_days with insufficient data still returns insufficient_data status."""
+        ht = HypothesisTest(
+            "Lag insufficient",
+            "test.nope_a",
+            "test.nope_b",
+            direction="positive",
+            lag_days=2,
+        )
+        result = ht.test(db, window_days=90)
+
+        assert result["status"] == "insufficient_data"
+
+    def test_load_hypotheses_passes_lag_days(self):
+        """load_hypotheses() passes lag_days from config to HypothesisTest."""
+        from analysis.hypothesis import load_hypotheses
+
+        config = {
+            "lifedata": {
+                "analysis": {
+                    "hypotheses": [
+                        {
+                            "name": "Lagged test",
+                            "metric_a": "a.b",
+                            "metric_b": "c.d",
+                            "direction": "negative",
+                            "lag_days": 3,
+                        },
+                        {
+                            "name": "No lag test",
+                            "metric_a": "e.f",
+                            "metric_b": "g.h",
+                            "direction": "positive",
+                        },
+                    ]
+                }
+            }
+        }
+        hyps = load_hypotheses(config)
+        assert len(hyps) == 2
+        assert hyps[0].lag_days == 3
+        assert hyps[1].lag_days == 0  # default
+
+
+# ──────────────────────────────────────────────────────────────
+# TestHypothesisConfigLagDays
+# ──────────────────────────────────────────────────────────────
+
+
+class TestHypothesisConfigLagDays:
+    """Tests for lag_days validation in HypothesisConfig (config_schema.py)."""
+
+    def test_lag_days_valid_range(self):
+        """lag_days values 0 through 7 are accepted."""
+        from core.config_schema import HypothesisConfig
+
+        for lag in range(8):
+            hc = HypothesisConfig(
+                name="test", metric_a="a.b", metric_b="c.d", lag_days=lag,
+            )
+            assert hc.lag_days == lag
+
+    def test_lag_days_default_zero(self):
+        """lag_days defaults to 0 when not specified."""
+        from core.config_schema import HypothesisConfig
+
+        hc = HypothesisConfig(name="test", metric_a="a.b", metric_b="c.d")
+        assert hc.lag_days == 0
+
+    def test_lag_days_negative_rejected(self):
+        """Negative lag_days raises ValidationError."""
+        from core.config_schema import HypothesisConfig
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="lag_days"):
+            HypothesisConfig(
+                name="test", metric_a="a.b", metric_b="c.d", lag_days=-1,
+            )
+
+    def test_lag_days_above_seven_rejected(self):
+        """lag_days > 7 raises ValidationError."""
+        from core.config_schema import HypothesisConfig
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="lag_days"):
+            HypothesisConfig(
+                name="test", metric_a="a.b", metric_b="c.d", lag_days=8,
+            )

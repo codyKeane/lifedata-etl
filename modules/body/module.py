@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_float, safe_json
+from core.utils import get_utc_offset, glob_files, safe_float, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -43,6 +43,14 @@ class BodyModule(ModuleInterface):
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._parser_registry: dict[str, Any] | None = None
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
@@ -241,7 +249,7 @@ class BodyModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(today),
                         source_module="body.derived",
                         event_type="daily_step_total",
                         value_numeric=float(step_total),
@@ -305,7 +313,7 @@ class BodyModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(today),
                         source_module="body.derived",
                         event_type="caffeine_level",
                         value_numeric=total_remaining,
@@ -366,7 +374,7 @@ class BodyModule(ModuleInterface):
                                 Event(
                                     timestamp_utc=day_ts,
                                     timestamp_local=day_ts,
-                                    timezone_offset="-0500",
+                                    timezone_offset=self._tz_offset(today),
                                     source_module="body.derived",
                                     event_type="sleep_duration",
                                     value_numeric=duration_hours,

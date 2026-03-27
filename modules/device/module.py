@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_float, safe_json
+from core.utils import get_utc_offset, glob_files, safe_float, safe_json
 from modules.device.parsers import PARSER_REGISTRY, SAFE_PARSER_REGISTRY
 
 if TYPE_CHECKING:
@@ -32,6 +32,14 @@ class DeviceModule(ModuleInterface):
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._quarantined_files: list[str] = []
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     @property
     def module_id(self) -> str:
@@ -216,7 +224,7 @@ class DeviceModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="device.derived",
                         event_type="unlock_count",
                         value_numeric=float(unlock_count),
@@ -264,7 +272,7 @@ class DeviceModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="device.derived",
                         event_type="screen_time_minutes",
                         value_numeric=total_screen_min,
@@ -333,7 +341,7 @@ class DeviceModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="device.derived",
                         event_type="charging_duration",
                         value_numeric=total_charge_min,
@@ -378,7 +386,10 @@ class DeviceModule(ModuleInterface):
                         last_cs = None
 
                 def _is_during_charging(ts_str: str) -> bool:
-                    return any(cs_start <= ts_str <= cs_end for cs_start, cs_end in charge_intervals)
+                    return any(
+                        cs_start <= ts_str <= cs_end
+                        for cs_start, cs_end in charge_intervals
+                    )
 
                 drain_segments: list[float] = []
                 for i in range(len(batt_rows) - 1):
@@ -405,7 +416,7 @@ class DeviceModule(ModuleInterface):
                         Event(
                             timestamp_utc=day_ts,
                             timestamp_local=day_ts,
-                            timezone_offset="-0500",
+                            timezone_offset=self._tz_offset(day),
                             source_module="device.derived",
                             event_type="battery_drain_rate",
                             value_numeric=avg_drain,
@@ -428,41 +439,47 @@ class DeviceModule(ModuleInterface):
         return derived
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily device metrics for report generation."""
+        """Return daily device metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         bullets: list[str] = []
 
         # Battery range
-        batt = db.conn.execute(
-            """
-            SELECT MIN(value_numeric), MAX(value_numeric), AVG(value_numeric)
-            FROM events
-            WHERE source_module = ?
-              AND date(timestamp_local) = ?
-              AND value_numeric IS NOT NULL
-            """,
-            ["device.battery", date_str],
-        ).fetchone()
-        if batt and batt[0] is not None:
-            bullets.append(
-                f"- Battery range: {batt[0]:.0f}% \u2013 {batt[1]:.0f}% "
-                f"(avg {batt[2]:.0f}%)"
-            )
+        if self.is_metric_enabled("device.battery"):
+            batt = db.conn.execute(
+                """
+                SELECT MIN(value_numeric), MAX(value_numeric), AVG(value_numeric)
+                FROM events
+                WHERE source_module = ?
+                  AND date(timestamp_local) = ?
+                  AND value_numeric IS NOT NULL
+                """,
+                ["device.battery", date_str],
+            ).fetchone()
+            if batt and batt[0] is not None:
+                bullets.append(
+                    f"- Battery range: {batt[0]:.0f}% \u2013 {batt[1]:.0f}% "
+                    f"(avg {batt[2]:.0f}%)"
+                )
 
         # Screen events
-        screen = db.conn.execute(
-            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
-            ["device.screen", date_str],
-        ).fetchone()
-        if screen and screen[0]:
-            bullets.append(f"- Screen events: {screen[0]}")
+        if self.is_metric_enabled("device.screen"):
+            screen = db.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+                ["device.screen", date_str],
+            ).fetchone()
+            if screen and screen[0]:
+                bullets.append(f"- Screen events: {screen[0]}")
 
         # Charging events
-        charge = db.conn.execute(
-            "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
-            ["device.charging", date_str],
-        ).fetchone()
-        if charge and charge[0]:
-            bullets.append(f"- Charging events: {charge[0]}")
+        if self.is_metric_enabled("device.charging"):
+            charge = db.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE source_module = ? AND date(timestamp_local) = ?",
+                ["device.charging", date_str],
+            ).fetchone()
+            if charge and charge[0]:
+                bullets.append(f"- Charging events: {charge[0]}")
 
         if not bullets:
             return None

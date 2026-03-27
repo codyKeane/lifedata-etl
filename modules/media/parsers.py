@@ -52,11 +52,11 @@ def _get_vader() -> Any:
     if _vader is not None:
         return _vader
     try:
-        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
         _vader = SentimentIntensityAnalyzer()
         HAS_VADER = True
         return _vader
-    except ImportError:
+    except (ImportError, LookupError):
         HAS_VADER = False
         return None
 

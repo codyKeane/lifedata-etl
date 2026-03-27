@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -46,6 +46,14 @@ class OracleModule(ModuleInterface):
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._parser_registry: dict[str, Any] | None = None
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
@@ -275,7 +283,7 @@ class OracleModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(latest_date or datetime.now(UTC).strftime("%Y-%m-%d")),
             source_module="oracle.iching.derived",
             event_type="hexagram_frequency",
             value_numeric=float(total),
@@ -341,7 +349,7 @@ class OracleModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(latest_date or datetime.now(UTC).strftime("%Y-%m-%d")),
             source_module="oracle.iching.derived",
             event_type="entropy_test",
             value_numeric=round(p_value, 6),
@@ -399,7 +407,7 @@ class OracleModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="oracle.rng.derived",
             event_type="daily_deviation",
             value_numeric=round(z, 4),
@@ -449,7 +457,7 @@ class OracleModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="oracle.schumann.derived",
             event_type="daily_summary",
             value_numeric=round(mean_hz, 4),
@@ -537,7 +545,11 @@ class OracleModule(ModuleInterface):
                     if val_num is not None:
                         if src_mod in ("mind.mood", "mind.assessment"):
                             mood_vals.append(val_num)
-                        if src_mod in ("mind.energy", "mind.assessment") and "energy" in (evt_type or ""):
+                        is_energy = (
+                            src_mod in ("mind.energy", "mind.assessment")
+                            and "energy" in (evt_type or "")
+                        )
+                        if is_energy:
                             energy_vals.append(val_num)
 
             activity[planet] = {
@@ -555,7 +567,7 @@ class OracleModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="oracle.planetary_hours.derived",
             event_type="activity_by_planet",
             value_numeric=float(len(activity)),
@@ -566,7 +578,10 @@ class OracleModule(ModuleInterface):
         )
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily oracle metrics for report generation."""
+        """Return daily oracle metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         rows = db.execute(
             """
             SELECT source_module, event_type, COUNT(*) as cnt,
@@ -597,52 +612,59 @@ class OracleModule(ModuleInterface):
             return None
 
         bullets: list[str] = []
-        iching_data = summary.get("oracle.iching.casting")
-        if iching_data and iching_data["count"] > 0:
-            bullets.append(f"- I Ching castings: {iching_data['count']}")
+        if self.is_metric_enabled("oracle.iching"):
+            iching_data = summary.get("oracle.iching.casting")
+            if iching_data and iching_data["count"] > 0:
+                bullets.append(f"- I Ching castings: {iching_data['count']}")
 
         # Query RNG daily deviation value_json for z/p values
-        try:
-            rng_rows = db.execute(
-                """
-                SELECT value_json FROM events
-                WHERE source_module = 'oracle.rng.derived'
-                  AND event_type = 'daily_deviation'
-                  AND date(timestamp_utc) = ?
-                ORDER BY timestamp_utc DESC LIMIT 1
-                """,
-                (date_str,),
-            )
-            rng_result = list(rng_rows.fetchall() if hasattr(rng_rows, "fetchall") else rng_rows)
-            if rng_result and rng_result[0][0]:
-                rng_json = json.loads(rng_result[0][0])
-                z = rng_json.get("z")
-                p = rng_json.get("p")
-                if z is not None and p is not None:
-                    bullets.append(f"- RNG deviation: z={z:.2f}, p={p:.3f}")
-        except Exception:
-            pass
+        if self.is_metric_enabled("oracle.rng.derived:daily_deviation"):
+            try:
+                rng_rows = db.execute(
+                    """
+                    SELECT value_json FROM events
+                    WHERE source_module = 'oracle.rng.derived'
+                      AND event_type = 'daily_deviation'
+                      AND date(timestamp_utc) = ?
+                    ORDER BY timestamp_utc DESC LIMIT 1
+                    """,
+                    (date_str,),
+                )
+                rng_result = list(
+                    rng_rows.fetchall() if hasattr(rng_rows, "fetchall") else rng_rows
+                )
+                if rng_result and rng_result[0][0]:
+                    rng_json = json.loads(rng_result[0][0])
+                    z = rng_json.get("z")
+                    p = rng_json.get("p")
+                    if z is not None and p is not None:
+                        bullets.append(f"- RNG deviation: z={z:.2f}, p={p:.3f}")
+            except Exception:
+                pass
 
         # Query Schumann resonance daily summary for mean Hz
-        try:
-            sch_rows = db.execute(
-                """
-                SELECT value_json FROM events
-                WHERE source_module = 'oracle.schumann.derived'
-                  AND event_type = 'daily_summary'
-                  AND date(timestamp_utc) = ?
-                ORDER BY timestamp_utc DESC LIMIT 1
-                """,
-                (date_str,),
-            )
-            sch_result = list(sch_rows.fetchall() if hasattr(sch_rows, "fetchall") else sch_rows)
-            if sch_result and sch_result[0][0]:
-                sch_json = json.loads(sch_result[0][0])
-                mean = sch_json.get("mean")
-                if mean is not None:
-                    bullets.append(f"- Schumann resonance: {mean:.2f} Hz avg")
-        except Exception:
-            pass
+        if self.is_metric_enabled("oracle.schumann.derived:daily_summary"):
+            try:
+                sch_rows = db.execute(
+                    """
+                    SELECT value_json FROM events
+                    WHERE source_module = 'oracle.schumann.derived'
+                      AND event_type = 'daily_summary'
+                      AND date(timestamp_utc) = ?
+                    ORDER BY timestamp_utc DESC LIMIT 1
+                    """,
+                    (date_str,),
+                )
+                sch_result = list(
+                    sch_rows.fetchall() if hasattr(sch_rows, "fetchall") else sch_rows
+                )
+                if sch_result and sch_result[0][0]:
+                    sch_json = json.loads(sch_result[0][0])
+                    mean = sch_json.get("mean")
+                    if mean is not None:
+                        bullets.append(f"- Schumann resonance: {mean:.2f} Hz avg")
+            except Exception:
+                pass
 
         return {
             "event_counts": summary,

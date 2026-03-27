@@ -28,6 +28,6 @@ numpy==2.4.3                  # numerical computations
 scipy==1.17.1                 # statistical tests (pearson, spearman)
 
 # NLP / Transcription
-vaderSentiment==3.3.2         # headline sentiment analysis
+nltk==3.9.1                   # VADER sentiment analysis (maintained)
 # openai-whisper               # transcription (~1GB+ install, optional)
 # pyswisseph                   # Swiss Ephemeris calculations (optional)

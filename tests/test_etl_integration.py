@@ -585,3 +585,82 @@ class TestETLLockfile:
                 os.unlink(str(tmp_path / ".etl_test.lock"))
             except OSError:
                 pass
+
+
+class TestETLToReportPipeline:
+    """End-to-end test: config → modules → parse → insert → post_ingest →
+    daily_summary → report generation → verify output contains expected sections."""
+
+    def test_full_pipeline_produces_report(self, tmp_path):
+        """Run ETL with report=True and verify report file is generated."""
+        config_path, env_path = _write_config_yaml(
+            tmp_path, allowlist=["device", "environment", "mind"],
+        )
+        raw_dir = str(tmp_path / "raw" / "LifeData")
+        _populate_device_csvs(raw_dir)
+        _populate_environment_csvs(raw_dir)
+        _populate_mind_csvs(raw_dir)
+
+        orch = _make_orchestrator(config_path, env_path)
+        summary = orch.run(report=True)
+
+        # 1. ETL succeeded
+        assert summary["total_events"] > 0
+        assert summary["failed_modules"] == []
+        assert summary["modules_run"] == 3
+
+        # 2. Daily summaries were populated
+        summaries = orch.db.conn.execute(
+            "SELECT source_module, metric_name FROM daily_summaries"
+        ).fetchall()
+        summary_modules = {r[0] for r in summaries}
+        # At least device should have a daily summary
+        assert "device" in summary_modules
+
+        # 3. Report file was generated (may be in a subdirectory like daily/)
+        reports_dir = tmp_path / "reports"
+        report_files = list(reports_dir.glob("**/*.md"))
+        assert len(report_files) >= 1, "Expected at least one report file"
+
+        # 4. Report contains expected sections
+        report_content = report_files[0].read_text()
+        assert "# LifeData" in report_content
+        assert "Module Status" in report_content or "Events" in report_content
+
+        # 5. Events table has data from all three modules
+        rows = orch.db.conn.execute(
+            "SELECT DISTINCT source_module FROM events"
+        ).fetchall()
+        source_modules = {r[0] for r in rows}
+        assert "device.screen" in source_modules
+        assert "device.battery" in source_modules
+
+        # 6. Affected dates were tracked
+        assert len(summary["affected_dates"]) >= 1
+
+        # 7. Metrics object is present and valid
+        m = summary["metrics"]
+        assert m.total_events_ingested > 0
+        assert m.total_files_discovered > 0
+        assert m.duration_sec >= 0
+
+        orch.db.close()
+
+    def test_dry_run_produces_no_report(self, tmp_path):
+        """dry_run + report=True should skip report generation."""
+        config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
+        raw_dir = str(tmp_path / "raw" / "LifeData")
+        _populate_device_csvs(raw_dir)
+
+        orch = _make_orchestrator(config_path, env_path)
+        summary = orch.run(report=True, dry_run=True)
+
+        # Events parsed but not inserted to DB
+        assert summary["total_events"] > 0
+
+        # No report generated during dry run
+        reports_dir = tmp_path / "reports"
+        report_files = list(reports_dir.glob("*.md"))
+        assert len(report_files) == 0
+
+        orch.db.close()

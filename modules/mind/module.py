@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 from modules.mind.parsers import PARSER_REGISTRY
 
 if TYPE_CHECKING:
@@ -33,6 +33,14 @@ class MindModule(ModuleInterface):
 
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     @property
     def module_id(self) -> str:
@@ -244,7 +252,7 @@ class MindModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="mind.derived",
                         event_type="subjective_day_score",
                         value_numeric=day_score,
@@ -289,7 +297,7 @@ class MindModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="mind.derived",
                         event_type="mood_trend_7d",
                         value_numeric=mood_avg,
@@ -332,7 +340,7 @@ class MindModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="mind.derived",
                         event_type="energy_stability",
                         value_numeric=cv,

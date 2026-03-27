@@ -67,6 +67,15 @@ class Event:
     #   "file=screen_2026-03-22.csv:line=47:parser=device:v=1.0.0"
     provenance: str | None = None
 
+    # Cached hash values — computed once on first access, then reused.
+    # Excluded from dataclass equality/repr via field(repr=False, compare=False).
+    _cached_raw_source_id: str | None = field(
+        default=None, repr=False, compare=False, init=False
+    )
+    _cached_event_id: str | None = field(
+        default=None, repr=False, compare=False, init=False
+    )
+
     @property
     def raw_source_id(self) -> str:
         """Deduplication hash.
@@ -76,7 +85,12 @@ class Event:
 
         Floats are normalized to :.6f for hash stability across Python versions.
         None values are encoded as the literal string 'None' for consistency.
+
+        The result is cached after first computation to avoid redundant SHA-256
+        hashing on repeated access (e.g., during validation, insertion, logging).
         """
+        if self._cached_raw_source_id is not None:
+            return self._cached_raw_source_id
         num_str = (
             f"{self.value_numeric:.6f}" if self.value_numeric is not None else "None"
         )
@@ -84,7 +98,8 @@ class Event:
             f"{self.timestamp_utc}|{self.source_module}|"
             f"{self.event_type}|{self.value_text}|{num_str}"
         )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+        self._cached_raw_source_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+        return self._cached_raw_source_id
 
     @property
     def event_id(self) -> str:
@@ -94,9 +109,14 @@ class Event:
         - INSERT OR REPLACE never changes the primary key.
         - media_ref foreign keys remain valid.
         - Cached correlation pointers don't go stale.
+
+        Cached after first computation.
         """
+        if self._cached_event_id is not None:
+            return self._cached_event_id
         digest = hashlib.sha256(self.raw_source_id.encode("utf-8")).hexdigest()
-        return str(uuid.UUID(hex=digest[:32]))
+        self._cached_event_id = str(uuid.UUID(hex=digest[:32]))
+        return self._cached_event_id
 
     def validate(self) -> list[str]:
         """Validate event data, returning a list of error messages.

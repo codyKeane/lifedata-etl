@@ -6,7 +6,7 @@
 # ──────────────────────────────────────────────────────────────
 
 lifedata:
-  version: "4.0"
+  version: "4.0.0"
   timezone: "America/Chicago"
   db_path: "~/LifeData/db/lifedata.db"
   raw_base: "~/LifeData/raw/LifeData"
@@ -357,6 +357,7 @@ lifedata:
         metric_b: body.sleep_quality
         direction: negative
         enabled: true
+        lag_days: 1
 
       - name: "Social interaction improves next-day mood"
         metric_a: social.density_score

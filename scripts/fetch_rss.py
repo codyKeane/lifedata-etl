@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 import feedparser
 import yaml
 from dotenv import load_dotenv
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 # Project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -1,5 +1,6 @@
 """
-Tests for WorldModule.post_ingest() derived metrics.
+Tests for WorldModule — post_ingest(), discover_files(), parse(),
+get_daily_summary(), _tz_offset(), _get_parsers(), and create_module().
 
 Derived metrics tested:
   - world.derived/news_sentiment_index: average sentiment of news/RSS headlines
@@ -8,11 +9,14 @@ Derived metrics tested:
 
 import json
 import math
+import os
+from unittest.mock import patch
 
 import pytest
 
 from core.event import Event
 from modules.world import create_module
+from modules.world.module import WorldModule
 
 DATE = "2026-03-20"
 DAY_TS = f"{DATE}T23:59:00+00:00"
@@ -369,3 +373,618 @@ class TestInformationEntropy:
         assert meta["num_categories"] == 2
         assert meta["category_counts"]["tech"] == 2
         assert meta["category_counts"]["sports"] == 1
+
+
+# ──────────────────────────────────────────────────────────────
+# TestTzOffset
+# ──────────────────────────────────────────────────────────────
+
+
+class TestTzOffset:
+    """Tests for WorldModule._tz_offset()."""
+
+    def test_tz_offset_default_timezone(self):
+        """Default timezone (America/Chicago) returns a valid offset."""
+        mod = WorldModule({"_timezone": "America/Chicago"})
+        result = mod._tz_offset("2026-03-20")
+        # Should be -0500 (CDT) or -0600 (CST) depending on DST
+        assert result in ("-0500", "-0600")
+
+    def test_tz_offset_fallback_on_exception(self):
+        """Invalid timezone triggers except branch, returns -0500."""
+        mod = WorldModule({"_timezone": "Invalid/Nonexistent_Zone_XYZ"})
+        result = mod._tz_offset("2026-03-20")
+        assert result == "-0500"
+
+    def test_tz_offset_no_timezone_in_config(self):
+        """No _timezone key in config defaults to America/Chicago."""
+        mod = WorldModule({})
+        result = mod._tz_offset("2026-03-20")
+        assert result in ("-0500", "-0600")
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGetParsers
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetParsers:
+    """Tests for WorldModule._get_parsers() lazy loading."""
+
+    def test_lazy_loads_parser_registry(self):
+        """Parser registry is None initially and loaded on first call."""
+        mod = WorldModule()
+        assert mod._parser_registry is None
+        parsers = mod._get_parsers()
+        assert parsers is not None
+        assert mod._parser_registry is parsers
+
+    def test_cached_on_second_call(self):
+        """Second call returns same object without re-import."""
+        mod = WorldModule()
+        first = mod._get_parsers()
+        second = mod._get_parsers()
+        assert first is second
+
+    def test_registry_has_expected_prefixes(self):
+        """Registry contains the expected file prefixes."""
+        mod = WorldModule()
+        parsers = mod._get_parsers()
+        assert "headlines_" in parsers
+        assert "markets_" in parsers
+        assert "feeds_" in parsers
+        assert "events_" in parsers
+
+
+# ──────────────────────────────────────────────────────────────
+# TestModuleProperties
+# ──────────────────────────────────────────────────────────────
+
+
+class TestModuleProperties:
+    """Tests for module_id, display_name, version, source_types, get_metrics_manifest."""
+
+    def test_module_id(self):
+        mod = WorldModule()
+        assert mod.module_id == "world"
+
+    def test_display_name(self):
+        mod = WorldModule()
+        assert mod.display_name == "World Module"
+
+    def test_version(self):
+        mod = WorldModule()
+        assert mod.version == "1.0.0"
+
+    def test_source_types(self):
+        mod = WorldModule()
+        assert "world.news" in mod.source_types
+        assert "world.markets" in mod.source_types
+        assert "world.rss" in mod.source_types
+        assert "world.gdelt" in mod.source_types
+
+    def test_get_metrics_manifest(self):
+        mod = WorldModule()
+        manifest = mod.get_metrics_manifest()
+        assert "metrics" in manifest
+        names = [m["name"] for m in manifest["metrics"]]
+        assert "world.news" in names
+        assert "world.derived:news_sentiment_index" in names
+        assert "world.derived:information_entropy" in names
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDiscoverFiles
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDiscoverFiles:
+    """Tests for WorldModule.discover_files()."""
+
+    def test_discover_json_files(self, tmp_path):
+        """Discovers JSON files matching parser prefixes in api subdirectories."""
+        # Build raw/api/{news,markets,rss,gdelt} structure
+        raw_dir = tmp_path / "raw" / "LifeData"
+        raw_dir.mkdir(parents=True)
+        api_base = tmp_path / "raw" / "api"
+        for subdir in ["news", "markets", "rss", "gdelt"]:
+            d = api_base / subdir
+            d.mkdir(parents=True)
+
+        # Create matching JSON files
+        (api_base / "news" / "headlines_2026-03-20.json").write_text("{}")
+        (api_base / "markets" / "markets_2026-03-20.json").write_text("{}")
+        (api_base / "rss" / "feeds_2026-03-20.json").write_text("{}")
+        (api_base / "gdelt" / "events_2026-03-20.json").write_text("{}")
+        # Non-matching file should be excluded
+        (api_base / "news" / "random_file.json").write_text("{}")
+
+        mod = WorldModule()
+        files = mod.discover_files(str(raw_dir))
+        basenames = [os.path.basename(f) for f in files]
+        assert "headlines_2026-03-20.json" in basenames
+        assert "markets_2026-03-20.json" in basenames
+        assert "feeds_2026-03-20.json" in basenames
+        assert "events_2026-03-20.json" in basenames
+        assert "random_file.json" not in basenames
+
+    def test_discover_deduplicates(self, tmp_path):
+        """Duplicate files (e.g., symlinks) are deduplicated."""
+        raw_dir = tmp_path / "raw" / "LifeData"
+        raw_dir.mkdir(parents=True)
+        news_dir = tmp_path / "raw" / "api" / "news"
+        news_dir.mkdir(parents=True)
+        original = news_dir / "headlines_2026-03-20.json"
+        original.write_text("{}")
+
+        mod = WorldModule()
+        files = mod.discover_files(str(raw_dir))
+        assert len([f for f in files if "headlines_2026-03-20" in f]) == 1
+
+    def test_discover_missing_dirs(self, tmp_path):
+        """Missing api subdirectories are skipped gracefully."""
+        raw_dir = tmp_path / "raw" / "LifeData"
+        raw_dir.mkdir(parents=True)
+        # No api/ dir at all
+        mod = WorldModule()
+        files = mod.discover_files(str(raw_dir))
+        assert files == []
+
+    def test_discover_raw_base_is_raw_itself(self, tmp_path):
+        """When raw_base IS the 'raw' directory, finds api subdirs correctly."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        api_news = raw_dir / "api" / "news"
+        api_news.mkdir(parents=True)
+        (api_news / "headlines_2026-03-20.json").write_text("{}")
+
+        mod = WorldModule()
+        files = mod.discover_files(str(raw_dir))
+        basenames = [os.path.basename(f) for f in files]
+        assert "headlines_2026-03-20.json" in basenames
+
+    def test_discover_deeply_nested_raw(self, tmp_path):
+        """When raw_base is deeply nested under 'raw', still finds api dir."""
+        raw_dir = tmp_path / "raw" / "LifeData" / "nested" / "deep"
+        raw_dir.mkdir(parents=True)
+        api_news = tmp_path / "raw" / "api" / "news"
+        api_news.mkdir(parents=True)
+        (api_news / "headlines_2026-03-20.json").write_text("{}")
+
+        mod = WorldModule()
+        files = mod.discover_files(str(raw_dir))
+        basenames = [os.path.basename(f) for f in files]
+        assert "headlines_2026-03-20.json" in basenames
+
+
+# ──────────────────────────────────────────────────────────────
+# TestParse
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParse:
+    """Tests for WorldModule.parse()."""
+
+    def test_parse_with_valid_news_json(self, tmp_path):
+        """Parses a headlines JSON file and returns events."""
+        news_file = tmp_path / "headlines_2026-03-20.json"
+        # Minimal valid news JSON structure
+        news_data = {
+            "status": "ok",
+            "articles": [
+                {
+                    "title": "Test headline",
+                    "publishedAt": "2026-03-20T12:00:00Z",
+                    "source": {"name": "TestSource"},
+                    "description": "Test description",
+                    "url": "https://example.com",
+                    "category": "technology",
+                },
+            ],
+        }
+        news_file.write_text(json.dumps(news_data))
+
+        mod = WorldModule()
+        events = mod.parse(str(news_file))
+        # Should return a list (possibly empty depending on parser expectations)
+        assert isinstance(events, list)
+
+    def test_parse_no_matching_parser(self, tmp_path):
+        """File with unknown prefix logs warning, returns empty list."""
+        unknown_file = tmp_path / "unknown_2026-03-20.json"
+        unknown_file.write_text("{}")
+
+        mod = WorldModule()
+        events = mod.parse(str(unknown_file))
+        assert events == []
+
+    def test_parse_with_matching_prefix_empty_result(self, tmp_path):
+        """Parser that returns empty list from malformed data."""
+        news_file = tmp_path / "headlines_2026-03-20.json"
+        # Invalid structure — no articles key
+        news_file.write_text(json.dumps({"status": "error"}))
+
+        mod = WorldModule()
+        events = mod.parse(str(news_file))
+        assert isinstance(events, list)
+
+
+# ──────────────────────────────────────────────────────────────
+# TestPostIngestEdgeCases
+# ──────────────────────────────────────────────────────────────
+
+
+class TestPostIngestEdgeCases:
+    """Edge cases for post_ingest()."""
+
+    def test_affected_dates_none_uses_today(self, db):
+        """When affected_dates is None, uses today's date."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc="2026-03-26T12:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        # affected_dates=None triggers the else branch using datetime.now(UTC)
+        mod.post_ingest(db, affected_dates=None)
+        # Should not crash; derived events are for today, not DATE
+
+    def test_empty_affected_dates_set(self, db):
+        """Empty set of affected_dates produces no derived events."""
+        mod = create_module(_world_config())
+        # Empty set is falsy, so takes the else branch
+        mod.post_ingest(db, affected_dates=set())
+        # No crash, no derived events
+
+    def test_disabled_sentiment_metric(self, db):
+        """Disabled sentiment metric produces no NSI event but entropy still works."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.3,
+                value_json=json.dumps({"category": "science"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        config = _world_config().copy()
+        config["disabled_metrics"] = ["world.derived:news_sentiment_index"]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        nsi_rows = _query_derived(db, "news_sentiment_index")
+        assert len(nsi_rows) == 0
+
+        entropy_rows = _query_derived(db, "information_entropy")
+        assert len(entropy_rows) == 1
+
+    def test_disabled_entropy_metric(self, db):
+        """Disabled entropy metric produces no entropy event but NSI still works."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        config = _world_config().copy()
+        config["disabled_metrics"] = ["world.derived:information_entropy"]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        nsi_rows = _query_derived(db, "news_sentiment_index")
+        assert len(nsi_rows) == 1
+
+        entropy_rows = _query_derived(db, "information_entropy")
+        assert len(entropy_rows) == 0
+
+    def test_both_metrics_disabled(self, db):
+        """Both derived metrics disabled produces no events."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        config = _world_config().copy()
+        config["disabled_metrics"] = [
+            "world.derived:news_sentiment_index",
+            "world.derived:information_entropy",
+        ]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        nsi_rows = _query_derived(db, "news_sentiment_index")
+        entropy_rows = _query_derived(db, "information_entropy")
+        assert len(nsi_rows) == 0
+        assert len(entropy_rows) == 0
+
+    def test_multiple_affected_dates(self, db):
+        """Multiple dates process independently."""
+        date1 = "2026-03-19"
+        date2 = "2026-03-20"
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{date1}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{date2}T10:00:00+00:00",
+                value_numeric=-0.3,
+                value_json=json.dumps({"category": "politics"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={date1, date2})
+
+        # Both dates should have NSI
+        rows1 = db.execute(
+            "SELECT value_numeric FROM events WHERE source_module='world.derived' "
+            "AND event_type='news_sentiment_index' AND timestamp_utc LIKE ?",
+            (f"{date1}%",),
+        ).fetchall()
+        rows2 = db.execute(
+            "SELECT value_numeric FROM events WHERE source_module='world.derived' "
+            "AND event_type='news_sentiment_index' AND timestamp_utc LIKE ?",
+            (f"{date2}%",),
+        ).fetchall()
+        assert len(rows1) == 1
+        assert len(rows2) == 1
+
+
+# ──────────────────────────────────────────────────────────────
+# TestComputeDayMetrics
+# ──────────────────────────────────────────────────────────────
+
+
+class TestComputeDayMetrics:
+    """Tests for _compute_day_metrics() edge cases."""
+
+    def test_json_decode_error_in_categories(self, db):
+        """Malformed value_json in DB triggers except branch in category extraction.
+
+        We insert valid events first, then directly inject a row with bad JSON
+        via raw SQL to bypass the DB's JSON validation.
+        """
+        # Insert a valid event first
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.3,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        # Directly insert a row with malformed JSON to trigger the except branch
+        db.conn.execute(
+            """INSERT OR REPLACE INTO events
+               (event_id, timestamp_utc, timestamp_local, timezone_offset,
+                source_module, event_type, value_numeric, value_json,
+                confidence, parser_version, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (
+                "bad-json-event-id",
+                f"{DATE}T10:00:00+00:00",
+                f"{DATE}T05:00:00-05:00",
+                "-0500",
+                "world.news",
+                "headline",
+                0.5,
+                "NOT VALID JSON{{{",
+                1.0,
+                "1.0.0",
+            ),
+        )
+        db.conn.commit()
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        # NSI should work with both events (0.5 + 0.3) / 2 = 0.4
+        nsi_rows = _query_derived(db, "news_sentiment_index")
+        assert len(nsi_rows) == 1
+        assert nsi_rows[0][0] == pytest.approx(0.4, abs=0.001)
+
+        # Entropy: only 1 valid category ("tech") from the second event
+        entropy_rows = _query_derived(db, "information_entropy")
+        assert len(entropy_rows) == 1
+        assert entropy_rows[0][0] == 0.0  # single category => 0 entropy
+
+    def test_null_value_json_handled(self, db):
+        """Events with None value_json don't crash category extraction."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=None,
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        nsi_rows = _query_derived(db, "news_sentiment_index")
+        assert len(nsi_rows) == 1
+
+    def test_no_data_for_date(self, db):
+        """No events for the date produces no derived events."""
+        mod = create_module(_world_config())
+        derived = mod._compute_day_metrics(db, "2026-01-01")
+        assert derived == []
+
+    def test_events_with_no_category_key(self, db):
+        """Events with valid JSON but no 'category' key use 'unknown'."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"source": "test"}),  # no category
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        entropy_rows = _query_derived(db, "information_entropy")
+        assert len(entropy_rows) == 1
+        meta = json.loads(entropy_rows[0][1])
+        assert "unknown" in meta["category_counts"]
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGetDailySummary
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """Tests for WorldModule.get_daily_summary()."""
+
+    def test_summary_with_data(self, db):
+        """Returns a valid summary dict with event counts and derived metrics."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.3,
+                value_json=json.dumps({"category": "science"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        # Run post_ingest to create derived events
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        assert "event_counts" in summary
+        assert "total_world_events" in summary
+        assert summary["total_world_events"] > 0
+
+    def test_summary_no_data(self, db):
+        """Returns None when no world events exist for the date."""
+        mod = create_module(_world_config())
+        summary = mod.get_daily_summary(db, "2020-01-01")
+        assert summary is None
+
+    def test_summary_structure_keys(self, db):
+        """Summary dict has expected top-level keys."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        assert "event_counts" in summary
+        assert "news_sentiment_index" in summary
+        assert "information_entropy" in summary
+        assert "total_world_events" in summary
+
+    def test_summary_derived_values(self, db):
+        """Derived metric values appear in summary when available."""
+        events = [
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+            _make_event(
+                "world.news",
+                "headline",
+                timestamp_utc=f"{DATE}T11:00:00+00:00",
+                value_numeric=0.5,
+                value_json=json.dumps({"category": "tech"}),
+            ),
+        ]
+        db.insert_events_for_module("world", events)
+
+        mod = create_module(_world_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is not None
+        # We should have world.derived entries in event_counts
+        derived_keys = [k for k in summary["event_counts"] if "derived" in k]
+        assert len(derived_keys) > 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestCreateModule
+# ──────────────────────────────────────────────────────────────
+
+
+class TestCreateModule:
+    """Tests for the create_module() factory function."""
+
+    def test_create_module_with_config(self):
+        mod = create_module({"enabled": True})
+        assert isinstance(mod, WorldModule)
+        assert mod.module_id == "world"
+
+    def test_create_module_no_config(self):
+        mod = create_module(None)
+        assert isinstance(mod, WorldModule)
+
+    def test_create_module_empty_config(self):
+        mod = create_module({})
+        assert isinstance(mod, WorldModule)

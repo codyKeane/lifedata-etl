@@ -41,13 +41,13 @@ def _resolve_env_vars(obj: object) -> None:
         for key, value in obj.items():
             if isinstance(value, str) and "${" in value:
                 obj[key] = _ENV_VAR_RE.sub(_resolve_env_var_match, value)
-            elif isinstance(value, (dict, list)):
+            elif isinstance(value, dict | list):
                 _resolve_env_vars(value)
     elif isinstance(obj, list):
         for i, item in enumerate(obj):
             if isinstance(item, str) and "${" in item:
                 obj[i] = _ENV_VAR_RE.sub(_resolve_env_var_match, item)
-            elif isinstance(item, (dict, list)):
+            elif isinstance(item, dict | list):
                 _resolve_env_vars(item)
 
 

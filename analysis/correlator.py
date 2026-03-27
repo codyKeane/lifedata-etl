@@ -79,31 +79,21 @@ class Correlator:
 
         return aligned
 
-    def correlate(
+    def _compute_from_aligned(
         self,
         metric_a: str,
         metric_b: str,
+        aligned: list[tuple[str, float, float]],
         window_days: int = 30,
         lag_days: int = 0,
-        min_confidence: float = 0.5,
     ) -> dict:
-        """Compute correlation between two metrics.
+        """Compute correlation statistics from pre-aligned data points.
 
-        Args:
-            metric_a: source_module identifier (e.g., 'mind.mood')
-            metric_b: source_module identifier (e.g., 'body.sleep_duration')
-            window_days: Number of days to look back.
-            lag_days: Shift metric_b by N days (test delayed effects).
-            min_confidence: Minimum confidence threshold for events.
+        Shared implementation used by both correlate() and _correlate_from_series().
 
-        Returns:
-            Dict with pearson_r, spearman_rho, p_value, n, confidence_tier, etc.
+        Returns insufficient_data result if fewer than 7 aligned points,
+        otherwise computes Pearson/Spearman and returns full result dict.
         """
-        series_a = self._get_daily_series(metric_a, window_days, min_confidence)
-        series_b = self._get_daily_series(metric_b, window_days, min_confidence)
-
-        aligned = self._align_series(series_a, series_b, lag_days)
-
         if len(aligned) < 7:
             return {
                 "metric_a": metric_a,
@@ -140,6 +130,33 @@ class Correlator:
             "confidence_tier": self.confidence_tier(len(aligned)),
         }
 
+    def correlate(
+        self,
+        metric_a: str,
+        metric_b: str,
+        window_days: int = 30,
+        lag_days: int = 0,
+        min_confidence: float = 0.5,
+    ) -> dict:
+        """Compute correlation between two metrics.
+
+        Args:
+            metric_a: source_module identifier (e.g., 'mind.mood')
+            metric_b: source_module identifier (e.g., 'body.sleep_duration')
+            window_days: Number of days to look back.
+            lag_days: Shift metric_b by N days (test delayed effects).
+            min_confidence: Minimum confidence threshold for events.
+
+        Returns:
+            Dict with pearson_r, spearman_rho, p_value, n, confidence_tier, etc.
+        """
+        series_a = self._get_daily_series(metric_a, window_days, min_confidence)
+        series_b = self._get_daily_series(metric_b, window_days, min_confidence)
+        aligned = self._align_series(series_a, series_b, lag_days)
+        return self._compute_from_aligned(
+            metric_a, metric_b, aligned, window_days, lag_days
+        )
+
     def _correlate_from_series(
         self,
         metric_a: str,
@@ -151,41 +168,9 @@ class Correlator:
     ) -> dict:
         """Compute correlation from pre-fetched series (avoids redundant DB calls)."""
         aligned = self._align_series(series_a, series_b, lag_days)
-
-        if len(aligned) < 7:
-            return {
-                "metric_a": metric_a,
-                "metric_b": metric_b,
-                "error": "insufficient_data",
-                "n": len(aligned),
-                "confidence_tier": "none",
-                "message": (
-                    f"Need 7+ co-occurring observations, have {len(aligned)}. "
-                    f"Collect more data before interpreting this relationship."
-                ),
-            }
-
-        a_vals = [p[1] for p in aligned]
-        b_vals = [p[2] for p in aligned]
-
-        from scipy import stats
-
-        pearson_r, pearson_p = stats.pearsonr(a_vals, b_vals)
-        spearman_rho, spearman_p = stats.spearmanr(a_vals, b_vals)
-
-        return {
-            "metric_a": metric_a,
-            "metric_b": metric_b,
-            "window_days": window_days,
-            "lag_days": lag_days,
-            "pearson_r": round(float(pearson_r), 4),
-            "spearman_rho": round(float(spearman_rho), 4),
-            "p_value": round(float(min(pearson_p, spearman_p)), 6),
-            "n": len(aligned),
-            "significant": float(min(pearson_p, spearman_p)) < 0.05,
-            "effect_size": self._interpret_r(float(pearson_r)),
-            "confidence_tier": self.confidence_tier(len(aligned)),
-        }
+        return self._compute_from_aligned(
+            metric_a, metric_b, aligned, window_days, lag_days
+        )
 
     def run_correlation_matrix(self, metrics: list[str], window_days: int = 30) -> dict:
         """Run all pairwise correlations between a list of metrics.
@@ -230,6 +215,39 @@ class Correlator:
             result["lag_days"] = lag
             results.append(result)
         return results
+
+    def persist_matrix(self, matrix_result: dict) -> int:
+        """Persist correlation matrix results to the correlations table.
+
+        Args:
+            matrix_result: Output from run_correlation_matrix().
+
+        Returns:
+            Number of correlations persisted.
+        """
+        count = 0
+        for result in matrix_result.get("matrix", []):
+            if "error" in result:
+                continue
+            try:
+                self.db.upsert_correlation(
+                    metric_a=result["metric_a"],
+                    metric_b=result["metric_b"],
+                    window_days=result.get("window_days", 30),
+                    pearson_r=result.get("pearson_r"),
+                    spearman_rho=result.get("spearman_rho"),
+                    p_value=result.get("p_value"),
+                    n_observations=result.get("n", 0),
+                )
+                count += 1
+            except Exception as e:
+                log.warning(
+                    f"Failed to persist correlation "
+                    f"{result['metric_a']} ~ {result['metric_b']}: {e}"
+                )
+        if count:
+            log.info(f"Persisted {count} correlations to database")
+        return count
 
     @staticmethod
     def confidence_tier(n: int) -> str:

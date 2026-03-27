@@ -328,6 +328,14 @@ class HypothesisConfig(BaseModel):
     threshold: float = 0.05
     enabled: bool = True
     window_days: int = 90
+    lag_days: int = 0
+
+    @field_validator("lag_days")
+    @classmethod
+    def lag_days_range(cls, v: int) -> int:
+        if v < 0 or v > 7:
+            raise ValueError(f"lag_days={v} — must be 0–7")
+        return v
 
 
 class ReportSection(BaseModel):
@@ -514,12 +522,14 @@ def validate_config(config: dict[str, Any]) -> RootConfig:
     import logging
 
     _log = logging.getLogger("lifedata.config")
+    env = ld.modules.environment
+    wld = ld.modules.world
     api_key_checks: list[tuple[str, str, bool]] = [
-        ("environment.weather_api_key", ld.modules.environment.weather_api_key, ld.modules.environment.enabled),
-        ("environment.airnow_api_key", ld.modules.environment.airnow_api_key, ld.modules.environment.enabled),
-        ("environment.ambee_api_key", ld.modules.environment.ambee_api_key, ld.modules.environment.enabled),
-        ("world.newsapi_key", ld.modules.world.newsapi_key, ld.modules.world.enabled),
-        ("world.eia_api_key", ld.modules.world.eia_api_key, ld.modules.world.enabled),
+        ("environment.weather_api_key", env.weather_api_key, env.enabled),
+        ("environment.airnow_api_key", env.airnow_api_key, env.enabled),
+        ("environment.ambee_api_key", env.ambee_api_key, env.enabled),
+        ("world.newsapi_key", wld.newsapi_key, wld.enabled),
+        ("world.eia_api_key", wld.eia_api_key, wld.enabled),
     ]
     for field_name, value, enabled in api_key_checks:
         if enabled and (not value or value.startswith("${")):

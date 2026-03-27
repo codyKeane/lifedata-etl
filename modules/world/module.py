@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_float, safe_json
+from core.utils import get_utc_offset, glob_files, safe_float, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -41,6 +41,14 @@ class WorldModule(ModuleInterface):
         self._config = config or {}
         # Lazy import to avoid circular dependencies at module load time
         self._parser_registry: dict[str, Any] | None = None
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
@@ -230,7 +238,7 @@ class WorldModule(ModuleInterface):
                 Event(
                     timestamp_utc=day_ts,
                     timestamp_local=day_ts,
-                    timezone_offset="-0500",
+                    timezone_offset=self._tz_offset(today),
                     source_module="world.derived",
                     event_type="news_sentiment_index",
                     value_numeric=nsi,
@@ -259,7 +267,7 @@ class WorldModule(ModuleInterface):
                 Event(
                     timestamp_utc=day_ts,
                     timestamp_local=day_ts,
-                    timezone_offset="-0500",
+                    timezone_offset=self._tz_offset(today),
                     source_module="world.derived",
                     event_type="information_entropy",
                     value_numeric=entropy,
@@ -280,7 +288,10 @@ class WorldModule(ModuleInterface):
         return derived_events
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily summary metrics for the report generator."""
+        """Return daily summary metrics for the report generator.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         rows = db.execute(
             """
             SELECT source_module, event_type, COUNT(*) as cnt,
@@ -309,11 +320,23 @@ class WorldModule(ModuleInterface):
         nsi_row = summary.get("world.derived.news_sentiment_index", {})
         entropy_row = summary.get("world.derived.information_entropy", {})
 
+        bullets: list[str] = []
+        if self.is_metric_enabled("world.derived:news_sentiment_index"):
+            nsi_val = nsi_row.get("avg_value")
+            if nsi_val is not None:
+                bullets.append(f"- News sentiment index: {nsi_val:.4f}")
+        if self.is_metric_enabled("world.derived:information_entropy"):
+            entropy_val = entropy_row.get("avg_value")
+            if entropy_val is not None:
+                bullets.append(f"- Information entropy: {entropy_val:.4f}")
+
         return {
             "event_counts": summary,
             "news_sentiment_index": nsi_row.get("avg_value"),
             "information_entropy": entropy_row.get("avg_value"),
             "total_world_events": sum(v["count"] for v in summary.values()),
+            "section_title": "World",
+            "bullets": bullets,
         }
 
 

@@ -163,7 +163,7 @@ def safe_float(value: object) -> float | None:
     if value is None:
         return None
     try:
-        result = float(str(value)) if not isinstance(value, (int, float)) else float(value)
+        result = float(str(value)) if not isinstance(value, int | float) else float(value)
         # Reject NaN and Inf — these corrupt database queries
         if result != result or result == float("inf") or result == float("-inf"):
             return None
@@ -180,7 +180,7 @@ def safe_int(value: object) -> int | None:
     if value is None:
         return None
     try:
-        return int(float(str(value)) if not isinstance(value, (int, float)) else float(value))
+        return int(float(str(value)) if not isinstance(value, int | float) else float(value))
     except (ValueError, TypeError):
         return None
 
@@ -202,6 +202,32 @@ def today_local(tz_name: str = "America/Chicago") -> str:
     """Return today's date as YYYY-MM-DD in the given timezone."""
     tz = ZoneInfo(tz_name)
     return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+def get_utc_offset(timezone_name: str, date_str: str) -> str:
+    """Convert IANA timezone name to UTC offset string for a given date.
+
+    DST-aware: uses noon on the given date to determine the offset,
+    avoiding ambiguity at DST boundaries.
+
+    Args:
+        timezone_name: IANA timezone (e.g., 'America/Chicago').
+        date_str: Date string YYYY-MM-DD.
+
+    Returns:
+        UTC offset string like '-0500' or '+0100'.
+    """
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(
+        hour=12, tzinfo=ZoneInfo(timezone_name)
+    )
+    offset = dt.utcoffset()
+    if offset is None:
+        return "-0500"
+    total_seconds = int(offset.total_seconds())
+    sign = "+" if total_seconds >= 0 else "-"
+    hours, remainder = divmod(abs(total_seconds), 3600)
+    minutes = remainder // 60
+    return f"{sign}{hours:02d}{minutes:02d}"
 
 
 def now_utc_iso() -> str:

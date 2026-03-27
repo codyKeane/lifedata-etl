@@ -587,3 +587,542 @@ class TestSleepDuration:
 
         rows = _query_derived(db, "sleep_duration")
         assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDisabledMetrics
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDisabledMetrics:
+    """Tests for disabled_metrics config suppressing derived metric computation."""
+
+    def test_disabled_step_total(self, db):
+        """Disabling daily_step_total should skip step total computation."""
+        events = [
+            _make_event(
+                "body.steps",
+                "step_count",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=5000.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        config = _body_config().copy()
+        config["disabled_metrics"] = ["body.derived:daily_step_total"]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "daily_step_total")
+        assert len(rows) == 0
+
+    def test_disabled_caffeine_level(self, db):
+        """Disabling caffeine_level should skip caffeine computation."""
+        events = [
+            _make_event(
+                "body.caffeine",
+                "intake",
+                timestamp_utc=f"{DATE}T08:00:00+00:00",
+                value_numeric=200.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        config = _body_config().copy()
+        config["disabled_metrics"] = ["body.derived:caffeine_level"]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "caffeine_level")
+        assert len(rows) == 0
+
+    def test_disabled_sleep_duration(self, db):
+        """Disabling sleep_duration should skip sleep computation."""
+        events = [
+            _make_event(
+                "body.sleep",
+                "sleep_start",
+                timestamp_utc=f"2026-03-19T23:00:00+00:00",
+                value_text="sleep_start",
+            ),
+            _make_event(
+                "body.sleep",
+                "sleep_end",
+                timestamp_utc=f"{DATE}T07:00:00+00:00",
+                value_text="sleep_end",
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        config = _body_config().copy()
+        config["disabled_metrics"] = ["body.derived:sleep_duration"]
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "sleep_duration")
+        assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestPostIngestNoAffectedDates
+# ──────────────────────────────────────────────────────────────
+
+
+class TestPostIngestNoAffectedDates:
+    """Tests for post_ingest when affected_dates is None (uses today)."""
+
+    def test_no_affected_dates_uses_today(self, db):
+        """When affected_dates is None, post_ingest should use today's date."""
+        mod = create_module(_body_config())
+        # Should not raise; processes today's date (no data, so no derived events)
+        mod.post_ingest(db, affected_dates=None)
+
+        # No events for today, so no derived metrics
+        rows = db.execute(
+            "SELECT COUNT(*) FROM events WHERE source_module = 'body.derived'"
+        ).fetchone()
+        assert rows[0] == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestModuleProperties
+# ──────────────────────────────────────────────────────────────
+
+
+class TestModuleProperties:
+    """Tests for module identity properties and manifest."""
+
+    def test_module_id(self):
+        mod = create_module(_body_config())
+        assert mod.module_id == "body"
+
+    def test_display_name(self):
+        mod = create_module(_body_config())
+        assert mod.display_name == "Body Module"
+
+    def test_version(self):
+        mod = create_module(_body_config())
+        assert mod.version == "1.0.0"
+
+    def test_source_types(self):
+        mod = create_module(_body_config())
+        types = mod.source_types
+        assert "body.steps" in types
+        assert "body.caffeine" in types
+        assert "body.derived" in types
+        assert "body.sleep" in types
+        assert len(types) >= 10
+
+    def test_metrics_manifest(self):
+        mod = create_module(_body_config())
+        manifest = mod.get_metrics_manifest()
+        assert "metrics" in manifest
+        names = [m["name"] for m in manifest["metrics"]]
+        assert "body.steps" in names
+        assert "body.derived:daily_step_total" in names
+        assert "body.derived:sleep_duration" in names
+        assert "body.derived:caffeine_level" in names
+
+    def test_create_module_no_config(self):
+        """create_module with None should still return a valid module."""
+        mod = create_module(None)
+        assert mod.module_id == "body"
+
+    def test_create_module_empty_config(self):
+        """create_module with empty dict should use defaults."""
+        mod = create_module({})
+        assert mod.module_id == "body"
+
+
+# ──────────────────────────────────────────────────────────────
+# TestGetDailySummary
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """Tests for get_daily_summary() report generation."""
+
+    def test_summary_with_data(self, db):
+        """Summary should aggregate body events by source_module and event_type."""
+        events = [
+            _make_event(
+                "body.steps",
+                "step_count",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=3000.0,
+            ),
+            _make_event(
+                "body.steps",
+                "step_count",
+                timestamp_utc=f"{DATE}T14:00:00+00:00",
+                value_numeric=5000.0,
+            ),
+            _make_event(
+                "body.caffeine",
+                "intake",
+                timestamp_utc=f"{DATE}T08:00:00+00:00",
+                value_numeric=200.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        summary = mod.get_daily_summary(db, DATE)
+
+        assert summary is not None
+        assert summary["section_title"] == "Body"
+        assert summary["total_body_events"] == 3
+        assert "event_counts" in summary
+        ec = summary["event_counts"]
+        assert "body.steps.step_count" in ec
+        assert ec["body.steps.step_count"]["count"] == 2
+        assert ec["body.steps.step_count"]["sum"] == 8000.0
+        assert "body.caffeine.intake" in ec
+        assert ec["body.caffeine.intake"]["count"] == 1
+
+    def test_summary_empty_returns_none(self, db):
+        """No body events should return None."""
+        mod = create_module(_body_config())
+        summary = mod.get_daily_summary(db, DATE)
+        assert summary is None
+
+    def test_summary_avg_min_max(self, db):
+        """Summary should include avg, min, max for numeric values."""
+        events = [
+            _make_event(
+                "body.heart_rate",
+                "reading",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=72.0,
+            ),
+            _make_event(
+                "body.heart_rate",
+                "reading",
+                timestamp_utc=f"{DATE}T14:00:00+00:00",
+                value_numeric=88.0,
+            ),
+            _make_event(
+                "body.heart_rate",
+                "reading",
+                timestamp_utc=f"{DATE}T18:00:00+00:00",
+                value_numeric=65.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        summary = mod.get_daily_summary(db, DATE)
+
+        assert summary is not None
+        hr = summary["event_counts"]["body.heart_rate.reading"]
+        assert hr["count"] == 3
+        assert hr["avg"] == 75.0
+        assert hr["min"] == 65.0
+        assert hr["max"] == 88.0
+        assert hr["sum"] == 225.0
+
+    def test_summary_null_numeric(self, db):
+        """Events with NULL value_numeric should still count, with None aggregates."""
+        events = [
+            _make_event(
+                "body.sleep",
+                "sleep_start",
+                timestamp_utc=f"{DATE}T23:00:00+00:00",
+                value_text="sleep_start",
+                value_numeric=None,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        summary = mod.get_daily_summary(db, DATE)
+
+        assert summary is not None
+        assert summary["total_body_events"] == 1
+        entry = summary["event_counts"]["body.sleep.sleep_start"]
+        assert entry["count"] == 1
+        assert entry["avg"] is None
+
+
+# ──────────────────────────────────────────────────────────────
+# TestDiscoverFiles
+# ──────────────────────────────────────────────────────────────
+
+
+import os
+
+
+class TestDiscoverFiles:
+    """Tests for discover_files() file discovery."""
+
+    def test_discover_quicklog(self, tmp_path):
+        """Should discover quicklog CSV files in logs/manual/."""
+        manual_dir = tmp_path / "logs" / "manual"
+        manual_dir.mkdir(parents=True)
+        (manual_dir / "quicklog_2026-03-20.csv").write_text("data\n")
+        (manual_dir / "unrelated.csv").write_text("data\n")
+
+        mod = create_module(_body_config())
+        files = mod.discover_files(str(tmp_path))
+        basenames = [os.path.basename(f) for f in files]
+        assert "quicklog_2026-03-20.csv" in basenames
+        assert "unrelated.csv" not in basenames
+
+    def test_discover_steps(self, tmp_path):
+        """Should discover steps CSV files in spool/health/."""
+        health_dir = tmp_path / "spool" / "health"
+        health_dir.mkdir(parents=True)
+        (health_dir / "steps_2026-03-20.csv").write_text("data\n")
+
+        mod = create_module(_body_config())
+        files = mod.discover_files(str(tmp_path))
+        basenames = [os.path.basename(f) for f in files]
+        assert "steps_2026-03-20.csv" in basenames
+
+    def test_discover_empty_dir(self, tmp_path):
+        """Should return empty list for directory with no matching files."""
+        mod = create_module(_body_config())
+        files = mod.discover_files(str(tmp_path))
+        assert files == []
+
+    def test_discover_deduplicates(self, tmp_path):
+        """Should deduplicate files found in multiple search directories."""
+        manual_dir = tmp_path / "logs" / "manual"
+        manual_dir.mkdir(parents=True)
+        csv_file = manual_dir / "quicklog_test.csv"
+        csv_file.write_text("data\n")
+
+        # Create a symlink in body/ that points to the same file
+        body_dir = tmp_path / "body"
+        body_dir.mkdir(parents=True)
+        link_path = body_dir / "quicklog_test.csv"
+        link_path.symlink_to(csv_file)
+
+        mod = create_module(_body_config())
+        files = mod.discover_files(str(tmp_path))
+        # Both resolve to the same realpath, so only 1 entry
+        assert len(files) == 1
+
+
+# ──────────────────────────────────────────────────────────────
+# TestParse
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParse:
+    """Tests for parse() dispatcher."""
+
+    def test_parse_no_matching_parser(self, tmp_path):
+        """File with no matching parser prefix should return empty list."""
+        unknown_file = tmp_path / "unknown_data.csv"
+        unknown_file.write_text("some,data\n")
+
+        mod = create_module(_body_config())
+        events = mod.parse(str(unknown_file))
+        assert events == []
+
+    def test_parse_empty_file(self, tmp_path):
+        """Empty quicklog file should return empty list (parser handles gracefully)."""
+        empty_file = tmp_path / "quicklog_empty.csv"
+        empty_file.write_text("")
+
+        mod = create_module(_body_config())
+        events = mod.parse(str(empty_file))
+        assert events == []
+
+
+# ──────────────────────────────────────────────────────────────
+# TestCaffeineEdgeCases
+# ──────────────────────────────────────────────────────────────
+
+
+class TestCaffeineEdgeCases:
+    """Edge cases for the caffeine pharmacokinetic model."""
+
+    def test_caffeine_with_naive_timestamp(self, db):
+        """Caffeine events with naive (no TZ) timestamps should still work.
+
+        Line 294: intake_dt.tzinfo is None -> replace with UTC
+        """
+        # Insert a caffeine event with a naive timestamp (no +00:00)
+        evt = Event(
+            timestamp_utc=f"{DATE}T08:00:00",
+            timestamp_local=f"{DATE}T03:00:00",
+            timezone_offset="-0500",
+            source_module="body.caffeine",
+            event_type="intake",
+            value_numeric=200.0,
+            confidence=1.0,
+            parser_version="1.0.0",
+        )
+        db.insert_events_for_module("body", [evt])
+
+        mod = create_module(_body_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "caffeine_level")
+        assert len(rows) == 1
+        assert rows[0][0] > 0
+
+    def test_caffeine_zero_mg_ignored(self, db):
+        """Caffeine events with 0mg should be filtered out (mg > 0 check)."""
+        events = [
+            _make_event(
+                "body.caffeine",
+                "intake",
+                timestamp_utc=f"{DATE}T08:00:00+00:00",
+                value_numeric=0.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "caffeine_level")
+        assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestSleepEdgeCases
+# ──────────────────────────────────────────────────────────────
+
+
+class TestSleepEdgeCases:
+    """Edge cases for sleep duration computation."""
+
+    def test_sleep_naive_timestamps(self, db):
+        """Sleep events with naive (no TZ) timestamps should still compute duration.
+
+        Lines 357, 359: start_dt/end_dt tzinfo is None -> replace with UTC
+        """
+        start_evt = Event(
+            timestamp_utc=f"2026-03-19T23:00:00",
+            timestamp_local=f"2026-03-19T18:00:00",
+            timezone_offset="-0500",
+            source_module="body.sleep",
+            event_type="sleep_start",
+            value_text="sleep_start",
+            confidence=1.0,
+            parser_version="1.0.0",
+        )
+        end_evt = Event(
+            timestamp_utc=f"{DATE}T07:00:00",
+            timestamp_local=f"{DATE}T02:00:00",
+            timezone_offset="-0500",
+            source_module="body.sleep",
+            event_type="sleep_end",
+            value_text="sleep_end",
+            confidence=1.0,
+            parser_version="1.0.0",
+        )
+        db.insert_events_for_module("body", [start_evt, end_evt])
+
+        mod = create_module(_body_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "sleep_duration")
+        assert len(rows) == 1
+        assert rows[0][0] == 8.0
+
+    def test_sleep_custom_target(self, db):
+        """Custom sleep_target_hours config should be reflected in delta."""
+        events = [
+            _make_event(
+                "body.sleep",
+                "sleep_start",
+                timestamp_utc=f"2026-03-19T23:00:00+00:00",
+                value_text="sleep_start",
+            ),
+            _make_event(
+                "body.sleep",
+                "sleep_end",
+                timestamp_utc=f"{DATE}T07:00:00+00:00",
+                value_text="sleep_end",
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        config = _body_config().copy()
+        config["sleep_target_hours"] = 8.0
+        mod = create_module(config)
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "sleep_duration")
+        assert len(rows) == 1
+        meta = json.loads(rows[0][1])
+        assert meta["target_hours"] == 8.0
+        assert meta["delta_hours"] == 0.0  # 8h sleep - 8h target
+
+    def test_sleep_zero_duration_rejected(self, db):
+        """Sleep with 0 duration (start == end) should be rejected by 0 < duration < 24 check."""
+        events = [
+            _make_event(
+                "body.sleep",
+                "sleep_start",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_text="sleep_start",
+            ),
+            _make_event(
+                "body.sleep",
+                "sleep_end",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_text="sleep_end",
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        mod.post_ingest(db, affected_dates={DATE})
+
+        rows = _query_derived(db, "sleep_duration")
+        assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# TestMultipleDays
+# ──────────────────────────────────────────────────────────────
+
+
+class TestMultipleDays:
+    """Tests for processing multiple dates in a single post_ingest call."""
+
+    def test_two_dates_both_processed(self, db):
+        """Passing two dates should produce derived events for each."""
+        date2 = "2026-03-21"
+        events = [
+            _make_event(
+                "body.steps",
+                "step_count",
+                timestamp_utc=f"{DATE}T10:00:00+00:00",
+                value_numeric=3000.0,
+            ),
+            _make_event(
+                "body.steps",
+                "step_count",
+                timestamp_utc=f"{date2}T10:00:00+00:00",
+                value_numeric=7000.0,
+            ),
+        ]
+        db.insert_events_for_module("body", events)
+
+        mod = create_module(_body_config())
+        mod.post_ingest(db, affected_dates={DATE, date2})
+
+        rows1 = _query_derived(db, "daily_step_total")
+        # Check events for date2 too
+        rows2 = db.execute(
+            """
+            SELECT value_numeric FROM events
+            WHERE source_module = 'body.derived'
+              AND event_type = 'daily_step_total'
+              AND timestamp_utc = ?
+            """,
+            (f"{date2}T23:59:00+00:00",),
+        ).fetchall()
+
+        assert len(rows1) == 1
+        assert rows1[0][0] == 3000.0
+        assert len(rows2) == 1
+        assert rows2[0][0] == 7000.0

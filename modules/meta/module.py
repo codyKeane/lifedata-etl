@@ -14,13 +14,14 @@ post_ingest.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import TYPE_CHECKING, Any
 
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import safe_json, today_local
+from core.utils import get_utc_offset, safe_json, today_local
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -36,6 +37,14 @@ class MetaModule(ModuleInterface):
 
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return DEFAULT_TZ_OFFSET
 
     @property
     def module_id(self) -> str:
@@ -107,10 +116,15 @@ class MetaModule(ModuleInterface):
 
         from core.utils import parse_timestamp
 
-        ts_utc, ts_local = parse_timestamp(fixed_ts, DEFAULT_TZ_OFFSET)
+        tz_off = self._tz_offset(date_str)
+        ts_utc, ts_local = parse_timestamp(fixed_ts, tz_off)
 
         # --- Completeness Check ---
-        if self._config.get("completeness_check", True) and self.is_metric_enabled("meta.completeness"):
+        completeness_enabled = (
+            self._config.get("completeness_check", True)
+            and self.is_metric_enabled("meta.completeness")
+        )
+        if completeness_enabled:
             try:
                 from modules.meta.completeness import check_daily_completeness
 
@@ -119,7 +133,7 @@ class MetaModule(ModuleInterface):
                     Event(
                         timestamp_utc=ts_utc,
                         timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="meta.completeness",
                         event_type="daily_check",
                         value_numeric=report["overall_pct"],
@@ -156,7 +170,7 @@ class MetaModule(ModuleInterface):
                     Event(
                         timestamp_utc=ts_utc,
                         timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="meta.quality",
                         event_type="daily_check",
                         value_numeric=float(issue_count),
@@ -200,7 +214,7 @@ class MetaModule(ModuleInterface):
                     Event(
                         timestamp_utc=ts_utc,
                         timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="meta.storage",
                         event_type="usage_report",
                         value_numeric=db_size,
@@ -238,7 +252,7 @@ class MetaModule(ModuleInterface):
                     Event(
                         timestamp_utc=ts_utc,
                         timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="meta.sync",
                         event_type="sync_status",
                         value_numeric=float(lag["newest_file_age_minutes"]),
@@ -270,7 +284,7 @@ class MetaModule(ModuleInterface):
                     Event(
                         timestamp_utc=ts_utc,
                         timestamp_local=ts_local,
-                        timezone_offset=DEFAULT_TZ_OFFSET,
+                        timezone_offset=self._tz_offset(date_str),
                         source_module="meta.sync",
                         event_type="backup_status",
                         value_numeric=(
@@ -307,7 +321,7 @@ class MetaModule(ModuleInterface):
                         Event(
                             timestamp_utc=ts_utc,
                             timestamp_local=ts_local,
-                            timezone_offset=DEFAULT_TZ_OFFSET,
+                            timezone_offset=self._tz_offset(date_str),
                             source_module="meta.sync",
                             event_type="relay_check",
                             value_text=relay["message"],
@@ -369,10 +383,8 @@ class MetaModule(ModuleInterface):
                     "value": val_num,
                 }
                 if val_json:
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError, TypeError):
                         summary[key]["detail"] = json.loads(val_json)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
 
         return summary if summary else None
 

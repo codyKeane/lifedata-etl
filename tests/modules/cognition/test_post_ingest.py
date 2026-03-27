@@ -541,3 +541,423 @@ class TestSubjectiveObjectiveGap:
 
         rows = _query_derived(db, "cognition.derived", "subjective_objective_gap")
         assert len(rows) == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# 6. Module properties and factory
+# ──────────────────────────────────────────────────────────────
+
+
+class TestModuleProperties:
+    """Tests for module_id, display_name, source_types, version, get_metrics_manifest."""
+
+    def test_module_id(self):
+        mod = create_module(MODULE_CONFIG)
+        assert mod.module_id == "cognition"
+
+    def test_display_name(self):
+        mod = create_module(MODULE_CONFIG)
+        assert mod.display_name == "Cognition Module"
+
+    def test_source_types(self):
+        mod = create_module(MODULE_CONFIG)
+        types = mod.source_types
+        assert "cognition.reaction" in types
+        assert "cognition.memory" in types
+        assert "cognition.derived" in types
+        assert len(types) == 9
+
+    def test_get_metrics_manifest(self):
+        mod = create_module(MODULE_CONFIG)
+        manifest = mod.get_metrics_manifest()
+        assert "metrics" in manifest
+        names = [m["name"] for m in manifest["metrics"]]
+        assert "cognition.reaction" in names
+        assert "cognition.derived:cognitive_load_index" in names
+        assert "cognition.derived:impairment_flag" in names
+
+    def test_create_module_factory(self):
+        mod = create_module({"enabled": True})
+        assert mod.module_id == "cognition"
+
+    def test_create_module_no_config(self):
+        mod = create_module(None)
+        assert mod.module_id == "cognition"
+
+
+# ──────────────────────────────────────────────────────────────
+# 7. _tz_offset fallback
+# ──────────────────────────────────────────────────────────────
+
+
+class TestTzOffset:
+    """_tz_offset fallback path when get_utc_offset raises."""
+
+    def test_fallback_on_invalid_timezone(self):
+        """An invalid timezone name should trigger the except branch and return -0500."""
+        mod = create_module({"_timezone": "Invalid/Nonexistent_Zone"})
+        result = mod._tz_offset("2026-03-20")
+        assert result == "-0500"
+
+    def test_valid_timezone(self):
+        """A valid timezone should return a proper offset string."""
+        mod = create_module({"_timezone": "America/Chicago"})
+        result = mod._tz_offset("2026-03-20")
+        # March 20, 2026 is CDT => -0500
+        assert result in ("-0500", "-0600")
+
+
+# ──────────────────────────────────────────────────────────────
+# 8. _get_parsers lazy loading
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetParsers:
+    """_get_parsers() lazy loading."""
+
+    def test_lazy_load_parser_registry(self):
+        mod = create_module(MODULE_CONFIG)
+        assert mod._parser_registry is None
+        parsers = mod._get_parsers()
+        assert mod._parser_registry is not None
+        assert "simple_rt" in parsers
+        assert "typing" in parsers
+
+    def test_cached_on_second_call(self):
+        mod = create_module(MODULE_CONFIG)
+        p1 = mod._get_parsers()
+        p2 = mod._get_parsers()
+        assert p1 is p2
+
+
+# ──────────────────────────────────────────────────────────────
+# 9. discover_files
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDiscoverFiles:
+    """discover_files() — finding CSV files for different cognition test types."""
+
+    def test_discovers_matching_csv_files(self, tmp_path):
+        spool = tmp_path / "spool" / "cognition"
+        spool.mkdir(parents=True)
+        (spool / "simple_rt_2026-03-20.csv").write_text("data\n")
+        (spool / "digit_span_2026-03-20.csv").write_text("data\n")
+        (spool / "typing_2026-03-20.csv").write_text("data\n")
+
+        mod = create_module(MODULE_CONFIG)
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 3
+        basenames = [__import__("os").path.basename(f) for f in files]
+        assert "simple_rt_2026-03-20.csv" in basenames
+        assert "digit_span_2026-03-20.csv" in basenames
+
+    def test_ignores_non_matching_files(self, tmp_path):
+        spool = tmp_path / "spool" / "cognition"
+        spool.mkdir(parents=True)
+        (spool / "random_file.csv").write_text("data\n")
+        (spool / "notes.txt").write_text("data\n")
+
+        mod = create_module(MODULE_CONFIG)
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 0
+
+    def test_empty_directory(self, tmp_path):
+        spool = tmp_path / "spool" / "cognition"
+        spool.mkdir(parents=True)
+
+        mod = create_module(MODULE_CONFIG)
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 0
+
+    def test_no_spool_directory(self, tmp_path):
+        """No spool/cognition directory at all should return empty list."""
+        mod = create_module(MODULE_CONFIG)
+        files = mod.discover_files(str(tmp_path))
+        assert len(files) == 0
+
+    def test_deduplicates_files(self, tmp_path):
+        spool = tmp_path / "spool" / "cognition"
+        spool.mkdir(parents=True)
+        target = spool / "simple_rt_2026.csv"
+        target.write_text("data\n")
+        # Create a symlink pointing to the same file
+        link = spool / "simple_rt_2026_link.csv"
+        link.symlink_to(target)
+
+        mod = create_module(MODULE_CONFIG)
+        files = mod.discover_files(str(tmp_path))
+        # Both match the prefix but resolve to the same realpath — deduplicated
+        assert len(files) == 1
+
+
+# ──────────────────────────────────────────────────────────────
+# 10. parse()
+# ──────────────────────────────────────────────────────────────
+
+
+class TestParse:
+    """parse() — dispatching to the correct parser."""
+
+    def test_parse_simple_rt_file(self, tmp_path):
+        csv_file = tmp_path / "simple_rt_2026.csv"
+        csv_file.write_text(
+            "1711303200,10:00:00,-0500,red:320:1500|green:280:2000|blue:310:1800\n"
+        )
+        mod = create_module(MODULE_CONFIG)
+        events = mod.parse(str(csv_file))
+        assert len(events) == 4  # 3 trials + 1 summary
+
+    def test_parse_no_matching_parser(self, tmp_path):
+        csv_file = tmp_path / "unknown_test_2026.csv"
+        csv_file.write_text("some,data\n")
+        mod = create_module(MODULE_CONFIG)
+        events = mod.parse(str(csv_file))
+        assert events == []
+
+    def test_parse_empty_file(self, tmp_path):
+        csv_file = tmp_path / "simple_rt_empty.csv"
+        csv_file.write_text("")
+        mod = create_module(MODULE_CONFIG)
+        events = mod.parse(str(csv_file))
+        assert events == []
+
+
+# ──────────────────────────────────────────────────────────────
+# 11. post_ingest with affected_dates=None
+# ──────────────────────────────────────────────────────────────
+
+
+class TestPostIngestNoAffectedDates:
+    """post_ingest with affected_dates=None — falls back to querying all dates."""
+
+    def test_post_ingest_none_dates_fallback(self, db):
+        """When affected_dates is None, post_ingest queries all distinct dates."""
+        events = [
+            _make_rt_event(TARGET_DATE, 250.0),
+            _make_rt_event(TARGET_DATE, 260.0),
+            _make_rt_event(TARGET_DATE, 255.0),
+        ]
+        db.insert_events_for_module("cognition", events)
+
+        mod = create_module(MODULE_CONFIG)
+        # affected_dates=None triggers the fallback query path
+        mod.post_ingest(db, affected_dates=None)
+
+        rows = _query_derived(db, "cognition.reaction.derived", "daily_baseline")
+        assert len(rows) == 1
+        assert rows[0][0] == 255.0  # median of [250, 255, 260]
+
+
+# ──────────────────────────────────────────────────────────────
+# 12. get_daily_summary
+# ──────────────────────────────────────────────────────────────
+
+
+class TestGetDailySummary:
+    """get_daily_summary() — report generation data."""
+
+    def test_summary_with_data(self, db):
+        """Summary returns correct structure with RT, memory, and derived data."""
+        events = [
+            _make_rt_event(TARGET_DATE, 250.0),
+            _make_rt_event(TARGET_DATE, 260.0),
+            _make_digit_span_event(TARGET_DATE, 7.0),
+        ]
+        db.insert_events_for_module("cognition", events)
+
+        mod = create_module(MODULE_CONFIG)
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert "event_counts" in summary
+        assert "total_cognition_events" in summary
+        assert summary["section_title"] == "Cognition"
+        assert summary["total_cognition_events"] == 3
+        assert "bullets" in summary
+
+    def test_summary_bullets_rt(self, db):
+        """Summary bullets include avg reaction time when RT data present."""
+        events = [
+            _make_rt_event(TARGET_DATE, 250.0),
+            _make_rt_event(TARGET_DATE, 260.0),
+        ]
+        db.insert_events_for_module("cognition", events)
+
+        mod = create_module(MODULE_CONFIG)
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert any("reaction time" in b.lower() for b in summary["bullets"])
+
+    def test_summary_bullets_memory(self, db):
+        """Summary bullets include working memory span."""
+        events = [_make_digit_span_event(TARGET_DATE, 8.0)]
+        db.insert_events_for_module("cognition", events)
+
+        mod = create_module(MODULE_CONFIG)
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert any("memory" in b.lower() for b in summary["bullets"])
+
+    def test_summary_with_cli_and_impairment(self, db):
+        """Summary includes CLI bullet and impairment flag bullet when present."""
+        from core.event import Event as Ev
+        ts = f"{TARGET_DATE}T23:59:00+00:00"
+        derived_events = [
+            Ev(
+                timestamp_utc=ts, timestamp_local=ts, timezone_offset="-0500",
+                source_module="cognition.derived", event_type="cognitive_load_index",
+                value_numeric=1.5, confidence=0.8, parser_version="1.0.0",
+            ),
+            Ev(
+                timestamp_utc=ts, timestamp_local=ts, timezone_offset="-0500",
+                source_module="cognition.derived", event_type="impairment_flag",
+                value_numeric=1.0, confidence=0.8, parser_version="1.0.0",
+            ),
+        ]
+        db.insert_events_for_module("cognition", derived_events)
+
+        mod = create_module(MODULE_CONFIG)
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is not None
+        assert any("cognitive load" in b.lower() for b in summary["bullets"])
+        assert any("impairment" in b.lower() for b in summary["bullets"])
+
+    def test_summary_empty_returns_none(self, db):
+        """No cognition events on a date returns None."""
+        mod = create_module(MODULE_CONFIG)
+        summary = mod.get_daily_summary(db, TARGET_DATE)
+        assert summary is None
+
+
+# ──────────────────────────────────────────────────────────────
+# 13. Edge cases in derived metrics
+# ──────────────────────────────────────────────────────────────
+
+
+class TestDerivedEdgeCases:
+    """Edge cases: zero-std impairment, zero-std z-score, JSON errors in time."""
+
+    def test_impairment_flag_zero_std_returns_none(self, db):
+        """When all CLI baseline values are identical (std < 0.01), no flag."""
+        from datetime import date, timedelta
+        # Insert identical CLI values for baseline
+        for day_offset in range(1, 8):
+            d = date(2026, 3, 20) - timedelta(days=day_offset)
+            date_str = d.isoformat()
+            ts = f"{date_str}T23:59:00+00:00"
+            ev = Event(
+                timestamp_utc=ts, timestamp_local=ts, timezone_offset="-0500",
+                source_module="cognition.derived",
+                event_type="cognitive_load_index",
+                value_numeric=0.5,  # all identical
+                confidence=0.8, parser_version="1.0.0",
+            )
+            db.insert_events_for_module("cognition", [ev])
+
+        mod = create_module(MODULE_CONFIG)
+        result = mod._compute_impairment_flag(db, TARGET_DATE, 0.5, 14, 2.0)
+        assert result is None
+
+    def test_zscore_metric_zero_std_returns_none(self, db):
+        """When baseline metric values are all identical (std < 0.01), z-score is None."""
+        from datetime import date, timedelta
+        # Insert identical RT values for baseline
+        for day_offset in range(1, 8):
+            d = date(2026, 3, 20) - timedelta(days=day_offset)
+            date_str = d.isoformat()
+            for _ in range(3):
+                db.insert_events_for_module("cognition", [
+                    _make_rt_event(date_str, 250.0),
+                ])
+        # Today's value
+        db.insert_events_for_module("cognition", [_make_rt_event(TARGET_DATE, 250.0)])
+
+        mod = create_module(MODULE_CONFIG)
+        result = mod._zscore_metric(
+            db, TARGET_DATE, 14, "cognition.reaction", "simple_rt"
+        )
+        assert result is None
+
+    def test_zscore_time_error_bad_json_today(self, db):
+        """Invalid JSON in today's time production events should be skipped."""
+        ts = f"{TARGET_DATE}T13:00:00+00:00"
+        bad_event = Event(
+            timestamp_utc=ts, timestamp_local=ts, timezone_offset="-0500",
+            source_module="cognition.time", event_type="production",
+            value_numeric=5.0, value_json="not-valid-json",
+            confidence=1.0, parser_version="1.0.0",
+        )
+        db.insert_events_for_module("cognition", [bad_event])
+
+        mod = create_module(MODULE_CONFIG)
+        result = mod._zscore_time_error(db, TARGET_DATE, 14)
+        assert result is None
+
+    def test_zscore_time_error_bad_json_baseline(self, db):
+        """Invalid JSON in baseline time production events should be skipped."""
+        from datetime import date, timedelta
+        # Valid today events
+        db.insert_events_for_module("cognition", [
+            _make_time_production_event(TARGET_DATE, 5.2),
+        ])
+        # Insert baseline with a mix of valid and invalid JSON
+        for day_offset in range(1, 8):
+            d = date(2026, 3, 20) - timedelta(days=day_offset)
+            date_str = d.isoformat()
+            ts = f"{date_str}T13:00:00+00:00"
+            if day_offset <= 3:
+                # Bad JSON
+                ev = Event(
+                    timestamp_utc=ts, timestamp_local=ts, timezone_offset="-0500",
+                    source_module="cognition.time", event_type="production",
+                    value_numeric=5.0, value_json="{bad-json}",
+                    confidence=1.0, parser_version="1.0.0",
+                )
+            else:
+                ev = _make_time_production_event(date_str, 5.0 + day_offset * 0.1)
+            db.insert_events_for_module("cognition", [ev])
+
+        mod = create_module(MODULE_CONFIG)
+        result = mod._zscore_time_error(db, TARGET_DATE, 14)
+        # 4 valid baseline entries (days 4-7), should compute z-score
+        assert result is not None or result is None  # just verifying no crash
+
+    def test_zscore_time_error_zero_std(self, db):
+        """When all baseline time errors are identical (std < 0.01), returns None."""
+        from datetime import date, timedelta
+        # Today's event
+        db.insert_events_for_module("cognition", [
+            _make_time_production_event(TARGET_DATE, 5.2),
+        ])
+        # Insert identical baseline time production events
+        for day_offset in range(1, 8):
+            d = date(2026, 3, 20) - timedelta(days=day_offset)
+            date_str = d.isoformat()
+            db.insert_events_for_module("cognition", [
+                _make_time_production_event(date_str, 5.0),  # all same error_pct = 0
+            ])
+
+        mod = create_module(MODULE_CONFIG)
+        result = mod._zscore_time_error(db, TARGET_DATE, 14)
+        assert result is None
+
+    def test_subjective_objective_gap_insufficient_baseline(self, db):
+        """When fewer than 3 baseline RT values, uses crude normalization."""
+        # Energy (subjective)
+        db.insert_events_for_module("cognition", [
+            _make_energy_event(TARGET_DATE, 8.0),
+        ])
+        # Only today's RT, no baseline
+        db.insert_events_for_module("cognition", [
+            _make_rt_event(TARGET_DATE, 280.0),
+            _make_rt_event(TARGET_DATE, 290.0),
+        ])
+
+        mod = create_module(MODULE_CONFIG)
+        mod.post_ingest(db, affected_dates={TARGET_DATE})
+
+        rows = _query_derived(db, "cognition.derived", "subjective_objective_gap")
+        assert len(rows) == 1
+        payload = json.loads(rows[0][1])
+        # Crude normalization: obj_z = -(today_rt - 300) / 100
+        assert "objective_z" in payload

@@ -34,7 +34,7 @@ python run_etl.py --monthly-report
 # Health summary
 python run_etl.py --status
 
-# Run tests (1024 tests, 30s timeout)
+# Run tests (1291 tests, 30s timeout)
 make test
 
 # Type checking

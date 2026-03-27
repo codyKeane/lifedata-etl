@@ -1,7 +1,7 @@
 # LifeData V4 — Master Walkthrough Bible
 
-**Version:** 4.0.0
-**Last Updated:** 2026-03-25
+**Version:** 4.3.0
+**Last Updated:** 2026-03-26
 **Codebase:** ~26,000 lines of Python across 143 files, 11 sovereign modules
 
 This document describes every moving part of the LifeData V4 system: how data enters, how it transforms, how modules interact through the orchestrator, and how the analysis layer derives insight. It is the single source of truth for anyone who needs to understand, operate, extend, or debug this system.
@@ -92,12 +92,12 @@ A nightly ETL pipeline parses these raw files into **universal Event objects**, 
 │   ├── compute_planetary_hours.py  # Astral library sunrise/sunset
 │   └── process_sensors.py   # Sensor Logger CSV aggregation
 │
-├── tests/                   # 605 tests (pytest, 30s timeout)
+├── tests/                   # 1291 tests (pytest, 30s timeout)
 ├── db/                      # SQLite database + daily backups
 ├── raw/                     # Sacred source data (never modified)
 ├── media/                   # Photos, video, voice, thumbnails
 ├── logs/                    # ETL logs (JSON-line) + metrics.jsonl
-├── reports/                 # Generated daily/weekly markdown reports
+├── reports/                 # Generated daily/weekly/monthly markdown reports
 ├── legacy/                  # Archived v3 code
 │
 ├── run_etl.py               # CLI entry point
@@ -396,6 +396,73 @@ Every module has a `create_module(config)` factory function in both `module.py` 
 ```python
 mod = importlib.import_module(f"modules.{module_name}.module")
 instance = mod.create_module(module_config)
+```
+
+### 6.5 Per-Metric Configurability
+
+Every module supports a `disabled_metrics` list in `config.yaml`. This allows granular control over which metrics are collected and computed without disabling the entire module.
+
+**Configuration:**
+
+```yaml
+modules:
+  behavior:
+    enabled: true
+    disabled_metrics:
+      - "behavior.derived:digital_restlessness"   # Exact match: disables only this metric
+      - "device.derived"                           # Prefix match: disables ALL device.derived:* metrics
+```
+
+**Matching rules:**
+
+- **Exact match:** `"behavior.derived:digital_restlessness"` disables only that specific metric.
+- **Prefix match:** `"device.derived"` disables all metrics whose name starts with `device.derived:` (e.g., `device.derived:screen_time_minutes`, `device.derived:unlock_count`, etc.).
+- **Default `[]`** means everything is enabled (backward compatible).
+
+**How it works — two enforcement points:**
+
+1. **`filter_events(events)`** — Called by the orchestrator after `parse()`. Removes raw events whose `source_module` matches any disabled metric pattern before database insertion. This is the parse-time gate.
+
+2. **`is_metric_enabled("metric_name")`** — Called inside each module's `post_ingest()` method to guard derived metric computation. Every derived metric computation is wrapped:
+
+```python
+def post_ingest(self, db, affected_dates):
+    for date_str in affected_dates:
+        if self.is_metric_enabled("behavior.derived:digital_restlessness"):
+            self._compute_digital_restlessness(db, date_str)
+        if self.is_metric_enabled("behavior.derived:fragmentation_index"):
+            self._compute_fragmentation(db, date_str)
+```
+
+**Startup validation:** The orchestrator validates all `disabled_metrics` names against the module's `get_metrics_manifest()`. Typos produce a warning in the log, preventing silent misconfiguration.
+
+**Example — disable a single derived metric:**
+
+```yaml
+modules:
+  behavior:
+    enabled: true
+    disabled_metrics:
+      - "behavior.derived:digital_restlessness"
+```
+
+This keeps all behavior raw event parsing and all other derived metrics (fragmentation_index, movement_entropy, etc.) active, while skipping only the digital_restlessness computation in `post_ingest()`.
+
+### 6.6 Schema Migrations
+
+Modules that need custom database tables implement `schema_migrations()`, returning an ordered list of DDL SQL statements (CREATE TABLE, ALTER TABLE only). The framework tracks applied versions per module in the `schema_versions` table:
+
+- Migrations are append-only: never reorder or modify existing entries.
+- New migrations are appended to the end of the list.
+- The orchestrator runs only migrations with version numbers higher than the last applied version.
+- All migrations for a module run in an all-or-nothing transaction.
+
+```python
+def schema_migrations(self) -> list[str]:
+    return [
+        "CREATE TABLE IF NOT EXISTS my_module_cache (key TEXT PRIMARY KEY, value TEXT)",
+        # Append new migrations here — never reorder above entries
+    ]
 ```
 
 ---
@@ -797,7 +864,11 @@ Each test uses `Correlator.correlate()` with a 90-day window, reports whether th
 
 ## 11. Report Generation
 
-`analysis/reports.py` generates a daily markdown report with these sections:
+`analysis/reports.py` generates daily, weekly, and monthly markdown reports.
+
+### 11.1 Daily Reports (`--report`)
+
+Generated with `--report`, saved to `reports/daily/report_YYYY-MM-DD.md`. Sections:
 
 1. **Data Summary** — Event counts by source module
 2. **Metrics** — Avg/min/max for all numeric metrics
@@ -812,7 +883,15 @@ Each test uses `Correlator.correlate()` with a 90-day window, reports whether th
 11. **Pattern Alerts** — Multi-variable compound patterns
 12. **Module Status** — Success/failure for each module's last run
 
-Output: `reports/daily/report_YYYY-MM-DD.md`
+### 11.2 Weekly Reports (`--weekly-report`)
+
+Generated with `--weekly-report`, saved to `reports/weekly/report_YYYY-MM-DD.md`. Aggregates the last 7 days with summary statistics per trend metric (avg, min, max, sparkline), module event counts, anomaly count, and hypothesis test results.
+
+### 11.3 Monthly Reports (`--monthly-report`)
+
+Generated with `--monthly-report`, saved to `reports/monthly/report_YYYY-MM-DD.md`. Same structure as weekly but covering a 30-day window.
+
+Flags combine naturally: `python run_etl.py --report --weekly-report --monthly-report` generates all three report types in one run.
 
 ---
 
@@ -872,6 +951,8 @@ All HTTP-based scripts use `scripts/_http.retry_get()` for exponential backoff o
 ```bash
 python run_etl.py                          # Full ETL
 python run_etl.py --report                 # ETL + daily report
+python run_etl.py --weekly-report          # ETL + weekly report (last 7 days)
+python run_etl.py --monthly-report         # ETL + monthly report (last 30 days)
 python run_etl.py --module device          # Single module only
 python run_etl.py --dry-run                # Parse without writing
 python run_etl.py --dry-run --module body  # Parse one module, no writes
@@ -907,6 +988,12 @@ Given a `raw_source_id` (or prefix), shows:
 # Nightly ETL + report (11:55 PM)
 55 23 * * * cd ~/LifeData && venv/bin/python run_etl.py --report
 
+# Weekly report (Sunday midnight)
+0 0 * * 0 cd ~/LifeData && venv/bin/python run_etl.py --weekly-report
+
+# Monthly report (1st of month 2 AM)
+0 2 1 * * cd ~/LifeData && venv/bin/python run_etl.py --monthly-report
+
 # News headlines (every 4 hours)
 0 */4 * * * cd ~/LifeData && venv/bin/python scripts/fetch_news.py
 
@@ -925,8 +1012,8 @@ Given a `raw_source_id` (or prefix), shows:
 # Planetary hours (5 AM daily)
 0 5 * * * cd ~/LifeData && venv/bin/python scripts/compute_planetary_hours.py
 
-# Weekly analysis (Sunday midnight)
-0 0 * * 0 cd ~/LifeData && venv/bin/python -c "from analysis.correlator import Correlator; ..."
+# Sensor processing (before nightly ETL)
+50 23 * * * cd ~/LifeData && venv/bin/python scripts/process_sensors.py
 ```
 
 ---
@@ -953,15 +1040,15 @@ Given a `raw_source_id` (or prefix), shows:
 
 ### Adding a New Hypothesis
 
-Add to the `HYPOTHESES` list in `analysis/hypothesis.py`:
+Add to the `hypotheses` list in `config.yaml` under `lifedata.analysis`:
 
-```python
-HypothesisTest(
-    "Human-readable hypothesis statement",
-    "metric_a.source_module",
-    "metric_b.source_module",
-    direction="positive|negative|any",
-)
+```yaml
+- name: "Human-readable hypothesis statement"
+  metric_a: metric_a.source_module
+  metric_b: metric_b.source_module
+  direction: positive  # positive, negative, or any
+  threshold: 0.05
+  lag_days: 0          # 0-7, test delayed effects
 ```
 
 ### Adding a Correlation Metric
@@ -992,5 +1079,5 @@ Add the `source_module` string to `weekly_correlation_metrics` in `config.yaml`.
 
 ---
 
-*This document covers the complete LifeData V4 system as of commit `6d78a42` + audited branch fixes.*
-*Generated 2026-03-25 by Claude Opus 4.6 (1M context).*
+*This document covers the complete LifeData V4 system as of v4.3.0.*
+*Updated 2026-03-26 by Claude Opus 4.6 (1M context).*

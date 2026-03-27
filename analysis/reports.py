@@ -7,13 +7,91 @@ events, anomalies, correlations, and system health.
 """
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 from analysis.anomaly import AnomalyDetector
+from analysis.registry import MetricsRegistry
 from core.logger import get_logger
 from core.utils import today_local
 
 log = get_logger("lifedata.analysis.reports")
+
+
+def _read_version() -> str:
+    """Read version from pyproject.toml — single source of truth."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    for line in pyproject.read_text().splitlines():
+        if line.startswith("version"):
+            return line.split("=", 1)[1].strip().strip('"')
+    return "4.0.0"
+
+
+_REPORT_VERSION = _read_version()
+
+# Allowlist of safe SQL aggregate functions — prevents injection via config
+_AGG_SQL = {"AVG": "AVG", "SUM": "SUM", "MIN": "MIN", "MAX": "MAX", "COUNT": "COUNT"}
+
+
+def _yaml_frontmatter(
+    report_type: str,
+    date_str: str,
+    event_count: int,
+    anomaly_count: int,
+) -> str:
+    """Build a YAML frontmatter block for a report.
+
+    Returns a string starting and ending with '---' lines.
+    """
+    generated = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    lines = [
+        "---",
+        f"type: {report_type}",
+        f"date: {date_str}",
+        f"generated: {generated}",
+        f"event_count: {event_count}",
+        f"anomaly_count: {anomaly_count}",
+        f"version: {_REPORT_VERSION}",
+        "---",
+    ]
+    return "\n".join(lines)
+
+
+def _resolve_trend_metrics(
+    configured_trends: list[str],
+    modules: list | None = None,
+) -> list[tuple[str, str, str, str | None]]:
+    """Resolve trend metric config into (label, source_module, agg_fn, event_type) tuples.
+
+    If configured_trends is provided (from config.yaml), parse those.
+    Otherwise fall back to metrics flagged trend_eligible in module manifests.
+    """
+    if configured_trends:
+        trend_metrics = []
+        for name in configured_trends:
+            if ":" in name:
+                src, evt = name.split(":", 1)
+                label = evt.replace("_", " ").title()
+                trend_metrics.append((label, src, "AVG", evt))
+            else:
+                label = name.split(".")[-1].replace("_", " ").title()
+                trend_metrics.append((label, name, "AVG", None))
+        return trend_metrics
+
+    # Registry-based fallback: use trend_eligible metrics from module manifests
+    if modules:
+        registry = MetricsRegistry(modules=modules)
+        trend_metrics = []
+        for m in registry.get_trend_metrics():
+            name = m["name"]
+            label = m.get("display_name", name.split(".")[-1].replace("_", " ").title())
+            agg = m.get("aggregate", "AVG")
+            evt = m.get("event_type")
+            src = name.split(":")[0] if ":" in name else name
+            trend_metrics.append((label, src, agg, evt))
+        return trend_metrics
+
+    return []
 
 
 def _sparkline(values: list[float]) -> str:
@@ -149,34 +227,16 @@ def generate_daily_report(
     report_cfg = analysis_cfg.get("report", {})
     configured_trends = report_cfg.get("trend_metrics", [])
 
-    if configured_trends:
-        # Config-driven trends: parse "source_module:event_type" format
-        trend_metrics = []
-        for name in configured_trends:
-            if ":" in name:
-                src, evt = name.split(":", 1)
-                # Use the event_type as the display label
-                label = evt.replace("_", " ").title()
-                trend_metrics.append((label, src, "AVG", evt))
-            else:
-                label = name.split(".")[-1].replace("_", " ").title()
-                trend_metrics.append((label, name, "AVG", None))
-    else:
-        # Legacy hardcoded defaults
-        trend_metrics = [
-            ("Mood", "mind.mood", "AVG", None),
-            ("Steps", "body.steps", "SUM", None),
-            ("Screen time", "device.derived", "AVG", "screen_time_minutes"),
-            ("Reaction time", "cognition.reaction", "AVG", None),
-        ]
+    trend_metrics = _resolve_trend_metrics(configured_trends, modules)
 
     trend_bullets: list[str] = []
 
     for label, source_mod, agg_fn, event_type_filter in trend_metrics:
+        safe_agg = _AGG_SQL.get(agg_fn.upper(), "AVG") if agg_fn else "AVG"
         if event_type_filter:
             trend_rows = db.conn.execute(
                 f"""
-                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                SELECT date(timestamp_local) as d, {safe_agg}(value_numeric)
                 FROM events
                 WHERE source_module = ?
                   AND event_type = ?
@@ -190,7 +250,7 @@ def generate_daily_report(
         else:
             trend_rows = db.conn.execute(
                 f"""
-                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                SELECT date(timestamp_local) as d, {safe_agg}(value_numeric)
                 FROM events
                 WHERE source_module = ?
                   AND date(timestamp_local) BETWEEN date(?, '-6 days') AND ?
@@ -261,7 +321,17 @@ def generate_daily_report(
     os.makedirs(expanded_dir, exist_ok=True)
 
     report_path = os.path.join(expanded_dir, f"report_{date_str}.md")
-    report_content = "\n".join(sections)
+
+    # Count anomalies for frontmatter
+    anomaly_count = len(anomalies) + len(patterns)
+
+    frontmatter = _yaml_frontmatter(
+        report_type="daily",
+        date_str=date_str,
+        event_count=total,
+        anomaly_count=anomaly_count,
+    )
+    report_content = frontmatter + "\n" + "\n".join(sections)
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
@@ -322,31 +392,16 @@ def _generate_period_report(
     report_cfg = analysis_cfg.get("report", {})
     configured_trends = report_cfg.get("trend_metrics", [])
 
-    if configured_trends:
-        trend_metrics = []
-        for name in configured_trends:
-            if ":" in name:
-                src, evt = name.split(":", 1)
-                label = evt.replace("_", " ").title()
-                trend_metrics.append((label, src, "AVG", evt))
-            else:
-                label = name.split(".")[-1].replace("_", " ").title()
-                trend_metrics.append((label, name, "AVG", None))
-    else:
-        trend_metrics = [
-            ("Mood", "mind.mood", "AVG", None),
-            ("Steps", "body.steps", "SUM", None),
-            ("Screen time", "device.derived", "AVG", "screen_time_minutes"),
-            ("Reaction time", "cognition.reaction", "AVG", None),
-        ]
+    trend_metrics = _resolve_trend_metrics(configured_trends, modules)
 
     stat_rows_data: list[tuple[str, float, float, float, str]] = []
 
     for label, source_mod, agg_fn, event_type_filter in trend_metrics:
+        safe_agg = _AGG_SQL.get(agg_fn.upper(), "AVG") if agg_fn else "AVG"
         if event_type_filter:
             daily_rows = db.conn.execute(
                 f"""
-                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                SELECT date(timestamp_local) as d, {safe_agg}(value_numeric)
                 FROM events
                 WHERE source_module = ?
                   AND event_type = ?
@@ -360,7 +415,7 @@ def _generate_period_report(
         else:
             daily_rows = db.conn.execute(
                 f"""
-                SELECT date(timestamp_local) as d, {agg_fn}(value_numeric)
+                SELECT date(timestamp_local) as d, {safe_agg}(value_numeric)
                 FROM events
                 WHERE source_module = ?
                   AND date(timestamp_local) BETWEEN ? AND ?
@@ -415,31 +470,16 @@ def _generate_period_report(
     detector = AnomalyDetector(db, config=config)
     total_anomalies = 0
 
-    # Check each day in the period for anomalies
-    date_cursor_rows = db.conn.execute(
-        """
-        SELECT date(?, '+' || seq || ' days') as d
-        FROM (
-            SELECT 0 as seq
-            UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
-            UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6
-            UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
-            UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12
-            UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15
-            UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18
-            UNION ALL SELECT 19 UNION ALL SELECT 20 UNION ALL SELECT 21
-            UNION ALL SELECT 22 UNION ALL SELECT 23 UNION ALL SELECT 24
-            UNION ALL SELECT 25 UNION ALL SELECT 26 UNION ALL SELECT 27
-            UNION ALL SELECT 28 UNION ALL SELECT 29
-        )
-        WHERE d BETWEEN ? AND ?
-        ORDER BY d
-        """,
-        [start_date, start_date, end_date],
-    ).fetchall()
+    # Generate date range in Python — works for arbitrary period lengths
+    period_start = date.fromisoformat(start_date)
+    period_end = date.fromisoformat(end_date)
+    period_dates = []
+    cursor_date = period_start
+    while cursor_date <= period_end:
+        period_dates.append(cursor_date.isoformat())
+        cursor_date += timedelta(days=1)
 
-    for row in date_cursor_rows:
-        day_str = row[0]
+    for day_str in period_dates:
         try:
             day_anomalies = detector.check_today(day_str)
             total_anomalies += len(day_anomalies)
@@ -496,7 +536,14 @@ def _generate_period_report(
     os.makedirs(expanded_dir, exist_ok=True)
 
     report_path = os.path.join(expanded_dir, f"report_{end_date}.md")
-    report_content = "\n".join(sections)
+
+    frontmatter = _yaml_frontmatter(
+        report_type=period_label.lower(),
+        date_str=end_date,
+        event_count=total,
+        anomaly_count=total_anomalies,
+    )
+    report_content = frontmatter + "\n" + "\n".join(sections)
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 from modules.social.parsers import PARSER_REGISTRY
 
 if TYPE_CHECKING:
@@ -29,6 +29,14 @@ class SocialModule(ModuleInterface):
 
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     @property
     def module_id(self) -> str:
@@ -199,36 +207,43 @@ class SocialModule(ModuleInterface):
         sms_count = counts.get("social.sms", 0)
         notif_count = counts.get("social.notification", 0)
 
-        if self.is_metric_enabled("social.derived:density_score"):
-            if call_count + sms_count + notif_count > 0:
-                weights = self._config.get("density_score_weights", {
-                    "call": 3.0, "sms": 2.0, "notification": 0.1,
-                })
-                density = round(call_count * weights["call"] + sms_count * weights["sms"] + notif_count * weights["notification"], 1)
-                derived.append(
-                    Event(
-                        timestamp_utc=day_ts,
-                        timestamp_local=day_ts,
-                        timezone_offset="-0500",
-                        source_module="social.derived",
-                        event_type="density_score",
-                        value_numeric=density,
-                        value_json=safe_json(
-                            {
-                                "calls": call_count,
-                                "sms": sms_count,
-                                "notifications": notif_count,
-                                "weights": dict(weights),
-                            }
-                        ),
-                        confidence=0.9,
-                        parser_version=self.version,
-                    )
+        if (
+            self.is_metric_enabled("social.derived:density_score")
+            and call_count + sms_count + notif_count > 0
+        ):
+            weights = self._config.get("density_score_weights", {
+                "call": 3.0, "sms": 2.0, "notification": 0.1,
+            })
+            density = round(
+                call_count * weights["call"]
+                + sms_count * weights["sms"]
+                + notif_count * weights["notification"],
+                1,
+            )
+            derived.append(
+                Event(
+                    timestamp_utc=day_ts,
+                    timestamp_local=day_ts,
+                    timezone_offset=self._tz_offset(day),
+                    source_module="social.derived",
+                    event_type="density_score",
+                    value_numeric=density,
+                    value_json=safe_json(
+                        {
+                            "calls": call_count,
+                            "sms": sms_count,
+                            "notifications": notif_count,
+                            "weights": dict(weights),
+                        }
+                    ),
+                    confidence=0.9,
+                    parser_version=self.version,
                 )
-                log.info(
-                    f"[{day}] Density score: {density} "
-                    f"(calls={call_count}, sms={sms_count}, notif={notif_count})"
-                )
+            )
+            log.info(
+                f"[{day}] Density score: {density} "
+                f"(calls={call_count}, sms={sms_count}, notif={notif_count})"
+            )
 
         # --- Digital hygiene ---
         # Ratio of productive app usage to total app usage.
@@ -304,7 +319,7 @@ class SocialModule(ModuleInterface):
                     Event(
                         timestamp_utc=day_ts,
                         timestamp_local=day_ts,
-                        timezone_offset="-0500",
+                        timezone_offset=self._tz_offset(day),
                         source_module="social.derived",
                         event_type="digital_hygiene",
                         value_numeric=hygiene_ratio,
@@ -355,7 +370,7 @@ class SocialModule(ModuleInterface):
                         Event(
                             timestamp_utc=day_ts,
                             timestamp_local=day_ts,
-                            timezone_offset="-0500",
+                            timezone_offset=self._tz_offset(day),
                             source_module="social.derived",
                             event_type="notification_load",
                             value_numeric=load,
@@ -380,7 +395,10 @@ class SocialModule(ModuleInterface):
         return derived
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily social metrics for report generation."""
+        """Return daily social metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         bullets: list[str] = []
 
         rows = db.conn.execute(
@@ -396,8 +414,9 @@ class SocialModule(ModuleInterface):
         ).fetchall()
 
         for row in rows:
-            label = row[0].replace("social.", "").replace("_", " ").title()
-            bullets.append(f"- {label}: {row[1]:,}")
+            if self.is_metric_enabled(row[0]):
+                label = row[0].replace("social.", "").replace("_", " ").title()
+                bullets.append(f"- {label}: {row[1]:,}")
 
         if not bullets:
             return None

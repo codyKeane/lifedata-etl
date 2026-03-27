@@ -7,6 +7,7 @@ validates file paths, and runs each module's parse → insert pipeline
 with SAVEPOINT isolation.
 """
 
+import contextlib
 import importlib
 import os
 import shutil
@@ -125,10 +126,8 @@ class Orchestrator:
             log.warning(f"SECURITY: {msg}")
 
         # 5. Best-effort LUKS/fscrypt check on the partition
-        try:
+        with contextlib.suppress(Exception):
             self._check_disk_encryption(lifedata_dir, warnings)
-        except Exception:
-            pass  # best-effort — never fail on this
 
         if not warnings:
             log.info("Startup security checks passed")
@@ -195,9 +194,7 @@ class Orchestrator:
             raw_root = base
             while raw_root.name and raw_root.name != "raw":
                 raw_root = raw_root.parent
-            if raw_root.name == "raw" and resolved.is_relative_to(raw_root):
-                return True
-            return False
+            return raw_root.name == "raw" and resolved.is_relative_to(raw_root)
         except Exception:
             return False
 
@@ -245,6 +242,18 @@ class Orchestrator:
             if not module_config.get("enabled", True):
                 log.info(f"Module '{module_name}' is disabled, skipping")
                 continue
+
+            # Inject timezone so modules can use it for derived events.
+            # Also compute a static fallback offset from the configured timezone
+            # so modules don't need to hardcode "-0500".
+            module_config["_timezone"] = self.config.lifedata.timezone
+            try:
+                from core.utils import get_utc_offset
+                module_config["_default_tz_offset"] = get_utc_offset(
+                    self.config.lifedata.timezone, "2026-01-15"
+                )
+            except Exception:
+                module_config["_default_tz_offset"] = "-0500"
 
             # Inject top-level paths into meta module config so it can
             # run storage/sync checks without the full config tree
@@ -455,13 +464,33 @@ class Orchestrator:
                 # Post-ingest hooks (isolated — a hook crash should not
                 # undo successfully inserted events)
                 if not dry_run:
+                    affected_dates = self.db.get_affected_dates()
                     try:
-                        module.post_ingest(self.db, self.db.get_affected_dates())
+                        module.post_ingest(self.db, affected_dates)
                     except Exception as e:
                         log.error(
                             f"[{module.module_id}] post_ingest() failed: {e}",
                             exc_info=True,
                         )
+
+                    # Populate daily_summaries from module's get_daily_summary()
+                    for date_str in affected_dates:
+                        try:
+                            summary = module.get_daily_summary(self.db, date_str)
+                            if summary:
+                                import json
+
+                                self.db.upsert_daily_summary(
+                                    date_local=date_str,
+                                    source_module=module.module_id,
+                                    metric_name="daily_summary",
+                                    value_json=json.dumps(summary),
+                                )
+                        except Exception as e:
+                            log.warning(
+                                f"[{module.module_id}] Daily summary failed "
+                                f"for {date_str}: {e}"
+                            )
 
                 self.db.update_module_status(
                     module.module_id,
@@ -507,15 +536,18 @@ class Orchestrator:
 
         # System stats
         db_path = os.path.expanduser(self.config.lifedata.db_path)
-        try:
+        with contextlib.suppress(OSError):
             metrics.db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             disk = shutil.disk_usage(os.path.expanduser("~/LifeData"))
             metrics.disk_free_gb = round(disk.free / (1024**3), 2)
-        except OSError:
-            pass
+
+        # WAL checkpoint — prevents unbounded WAL growth over nightly runs
+        if not dry_run:
+            try:
+                self.db.checkpoint()
+            except Exception as e:
+                log.warning(f"WAL checkpoint failed: {e}")
 
         failed_modules = metrics.failed_modules()
         log.info(
@@ -526,6 +558,10 @@ class Orchestrator:
 
         if failed_modules:
             log.warning(f"Failed modules: {', '.join(failed_modules)}")
+
+        # Persist correlation matrix for hypothesis results and --trace
+        if not dry_run:
+            self._persist_correlations()
 
         # Report generation
         if report and not dry_run:
@@ -560,3 +596,26 @@ class Orchestrator:
 
         log.info("=" * 60)
         return summary
+
+    def _persist_correlations(self) -> None:
+        """Compute and persist correlation matrix to the database.
+
+        Uses weekly_correlation_metrics from config to determine which
+        metric pairs to correlate. Results are stored in the correlations
+        table for use by reports and --trace.
+        """
+        try:
+            import importlib
+            mod = importlib.import_module("analysis.correlator")
+            CorrelatorCls = mod.Correlator
+
+            cfg_dump = self.config.model_dump()
+            analysis_cfg = cfg_dump.get("lifedata", {}).get("analysis", {})
+            corr_metrics = list(analysis_cfg.get("weekly_correlation_metrics", []))
+            if corr_metrics:
+                window = int(analysis_cfg.get("correlation_window_days", 30))
+                correlator = CorrelatorCls(self.db)
+                matrix = correlator.run_correlation_matrix(corr_metrics, window)
+                correlator.persist_matrix(matrix)
+        except Exception as e:
+            log.warning(f"Correlation persistence failed: {e}")

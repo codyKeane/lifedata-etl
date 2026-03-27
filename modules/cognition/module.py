@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from core.event import Event
 from core.logger import get_logger
 from core.module_interface import ModuleInterface
-from core.utils import glob_files, safe_json
+from core.utils import get_utc_offset, glob_files, safe_json
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -47,6 +47,14 @@ class CognitionModule(ModuleInterface):
     def __init__(self, config: dict[str, Any] | None = None):
         self._config = config or {}
         self._parser_registry: dict[str, Any] | None = None
+
+    def _tz_offset(self, date_str: str) -> str:
+        """Get DST-aware UTC offset for a date from config timezone."""
+        tz_name = self._config.get("_timezone", "America/Chicago")
+        try:
+            return get_utc_offset(tz_name, date_str)
+        except Exception:
+            return str(self._config.get("_default_tz_offset", "-0500"))
 
     def _get_parsers(self) -> dict[str, Any]:
         """Lazy-load parser registry."""
@@ -295,7 +303,7 @@ class CognitionModule(ModuleInterface):
             Event(
                 timestamp_utc=ts_utc,
                 timestamp_local=ts_utc,
-                timezone_offset="-0500",
+                timezone_offset=self._tz_offset(date_str),
                 source_module="cognition.reaction.derived",
                 event_type="daily_baseline",
                 value_numeric=round(median_rt, 1),
@@ -315,7 +323,9 @@ class CognitionModule(ModuleInterface):
 
         return events
 
-    def _compute_cognitive_load_index(self, db: Database, date_str: str, baseline_days: int) -> Event | None:
+    def _compute_cognitive_load_index(
+        self, db: Database, date_str: str, baseline_days: int,
+    ) -> Event | None:
         """Weighted composite z-score across all available cognitive probes."""
         components = {}
 
@@ -375,7 +385,7 @@ class CognitionModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="cognition.derived",
             event_type="cognitive_load_index",
             value_numeric=round(cli, 3),
@@ -424,7 +434,7 @@ class CognitionModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="cognition.derived",
             event_type="impairment_flag",
             value_numeric=float(impaired),
@@ -476,7 +486,7 @@ class CognitionModule(ModuleInterface):
         return Event(
             timestamp_utc=peak_ts,
             timestamp_local=peak_ts,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(ref_date or datetime.now(UTC).strftime("%Y-%m-%d")),
             source_module="cognition.derived",
             event_type="peak_cognition_hour",
             value_numeric=float(best_hour),
@@ -530,7 +540,9 @@ class CognitionModule(ModuleInterface):
             """,
             (date_str, date_str),
         )
-        all_rt_set = all_rt_rows.fetchall() if hasattr(all_rt_rows, "fetchall") else list(all_rt_rows)
+        all_rt_set = (
+            all_rt_rows.fetchall() if hasattr(all_rt_rows, "fetchall") else list(all_rt_rows)
+        )
 
         today_vals = [r[0] for r in all_rt_set if r[1] == date_str]
         baseline_vals = [r[0] for r in all_rt_set if r[1] != date_str]
@@ -558,7 +570,7 @@ class CognitionModule(ModuleInterface):
         return Event(
             timestamp_utc=ts_utc,
             timestamp_local=ts_utc,
-            timezone_offset="-0500",
+            timezone_offset=self._tz_offset(date_str),
             source_module="cognition.derived",
             event_type="subjective_objective_gap",
             value_numeric=gap,
@@ -692,7 +704,10 @@ class CognitionModule(ModuleInterface):
         return float((today_err - mean_err) / std_err)
 
     def get_daily_summary(self, db: Database, date_str: str) -> dict[str, Any] | None:
-        """Return daily cognition metrics for report generation."""
+        """Return daily cognition metrics for report generation.
+
+        Respects disabled_metrics — bullets for disabled metrics are omitted.
+        """
         rows = db.execute(
             """
             SELECT source_module, event_type, COUNT(*) as cnt,
@@ -723,18 +738,22 @@ class CognitionModule(ModuleInterface):
             return None
 
         bullets: list[str] = []
-        rt_data = summary.get("cognition.reaction.simple_rt")
-        if rt_data and rt_data["avg"] is not None:
-            bullets.append(f"- Avg reaction time: {rt_data['avg']:.0f} ms")
-        mem_data = summary.get("cognition.memory.digit_span")
-        if mem_data and mem_data["max"] is not None:
-            bullets.append(f"- Working memory span: {mem_data['max']:.0f}")
-        load_data = summary.get("cognition.derived.cognitive_load_index")
-        if load_data and load_data["avg"] is not None:
-            bullets.append(f"- Cognitive load index: {load_data['avg']:.2f}")
-        impair_data = summary.get("cognition.derived.impairment_flag")
-        if impair_data and impair_data["max"] is not None and impair_data["max"] > 0:
-            bullets.append("- Impairment flag: YES")
+        if self.is_metric_enabled("cognition.reaction"):
+            rt_data = summary.get("cognition.reaction.simple_rt")
+            if rt_data and rt_data["avg"] is not None:
+                bullets.append(f"- Avg reaction time: {rt_data['avg']:.0f} ms")
+        if self.is_metric_enabled("cognition.memory"):
+            mem_data = summary.get("cognition.memory.digit_span")
+            if mem_data and mem_data["max"] is not None:
+                bullets.append(f"- Working memory span: {mem_data['max']:.0f}")
+        if self.is_metric_enabled("cognition.derived:cognitive_load_index"):
+            load_data = summary.get("cognition.derived.cognitive_load_index")
+            if load_data and load_data["avg"] is not None:
+                bullets.append(f"- Cognitive load index: {load_data['avg']:.2f}")
+        if self.is_metric_enabled("cognition.derived:impairment_flag"):
+            impair_data = summary.get("cognition.derived.impairment_flag")
+            if impair_data and impair_data["max"] is not None and impair_data["max"] > 0:
+                bullets.append("- Impairment flag: YES")
 
         return {
             "event_counts": summary,

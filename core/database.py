@@ -549,8 +549,9 @@ class Database:
         """
         first_word = sql.strip().split()[0].upper() if sql.strip() else ""
         if first_word not in self._ALLOWED_READ_SQL:
+            allowed = ", ".join(sorted(self._ALLOWED_READ_SQL))
             raise ValueError(
-                f"execute() only allows read queries ({', '.join(sorted(self._ALLOWED_READ_SQL))}), "
+                f"execute() only allows read queries ({allowed}), "
                 f"got: '{first_word}'. Use a dedicated write method instead."
             )
         if params:
@@ -578,6 +579,51 @@ class Database:
             (date_local, source_module, metric_name, value_numeric, value_json),
         )
         self.conn.commit()
+
+    def upsert_correlation(
+        self,
+        metric_a: str,
+        metric_b: str,
+        window_days: int,
+        pearson_r: float | None,
+        spearman_rho: float | None,
+        p_value: float | None,
+        n_observations: int,
+    ) -> None:
+        """Insert or update a correlation result."""
+        import hashlib
+        from datetime import UTC, datetime
+
+        # Deterministic ID from the metric pair + window
+        raw = f"{metric_a}|{metric_b}|{window_days}"
+        corr_id = hashlib.sha256(raw.encode()).hexdigest()[:16]
+        computed = datetime.now(UTC).isoformat()
+
+        self.conn.execute(
+            """
+            INSERT INTO correlations
+                (corr_id, metric_a, metric_b, window_days,
+                 pearson_r, spearman_rho, p_value, n_observations, computed_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(corr_id) DO UPDATE SET
+                pearson_r = excluded.pearson_r,
+                spearman_rho = excluded.spearman_rho,
+                p_value = excluded.p_value,
+                n_observations = excluded.n_observations,
+                computed_utc = excluded.computed_utc
+            """,
+            (corr_id, metric_a, metric_b, window_days,
+             pearson_r, spearman_rho, p_value, n_observations, computed),
+        )
+        self.conn.commit()
+
+    def checkpoint(self) -> None:
+        """Force WAL checkpoint after ETL completion.
+
+        TRUNCATE mode ensures the WAL file is reset to zero length,
+        preventing unbounded growth over months of nightly runs.
+        """
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def close(self) -> None:
         """Close the database connection."""

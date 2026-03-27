@@ -129,7 +129,7 @@ Flags combine naturally: `python run_etl.py --report --weekly-report --monthly-r
 make etl              # Run ETL + daily report
 make etl-dry          # Dry run (parse only, no writes)
 make status           # Health summary
-make test             # Run all 1024 tests
+make test             # Run all 1291 tests
 make test-cov         # Tests with coverage report
 make test-perf        # Performance benchmarks (longer timeout)
 make test-integration # Integration tests
@@ -545,8 +545,8 @@ python run_etl.py
 # Nightly ETL + all reports
 55 23 * * * cd ~/LifeData && venv/bin/python scripts/process_sensors.py && venv/bin/python run_etl.py --report
 
-# Weekly report (Monday 1 AM)
-0 1 * * 1 cd ~/LifeData && venv/bin/python run_etl.py --weekly-report
+# Weekly report (Sunday midnight)
+0 0 * * 0 cd ~/LifeData && venv/bin/python run_etl.py --weekly-report
 
 # Monthly report (1st of month 2 AM)
 0 2 1 * * cd ~/LifeData && venv/bin/python run_etl.py --monthly-report
@@ -750,7 +750,7 @@ Startup security checks verify these automatically and log warnings for any fail
 ├── modules/             # 11 sovereign data modules
 ├── analysis/            # Correlator, anomaly detector, hypothesis tester, reports, registry
 ├── scripts/             # 7 API fetchers + sensor processor
-├── tests/               # 1024 tests (77% coverage)
+├── tests/               # 1291 tests (81% coverage)
 ├── db/                  # SQLite database + daily backups
 ├── raw/                 # Source data (never modified)
 ├── media/               # Photos, video, voice

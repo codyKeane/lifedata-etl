@@ -494,10 +494,20 @@ class TestConcurrentInsertSafety:
         db_path = str(tmp_path / "concurrent.db")
         errors = []
 
+        # Create schema before threads start to avoid DDL contention
+        setup_db = Database(db_path)
+        setup_db.ensure_schema()
+        setup_db.close()
+
+        # Serialize Database creation to avoid PRAGMA contention,
+        # then let inserts run concurrently with retry on lock
+        init_lock = threading.Lock()
+
         def insert_module(module_name, source, n_events):
             try:
-                database = Database(db_path)
-                database.ensure_schema()
+                with init_lock:
+                    database = Database(db_path)
+                    database.conn.execute("PRAGMA busy_timeout = 30000")
                 events = [
                     valid_event_factory(
                         source_module=source,
@@ -505,7 +515,17 @@ class TestConcurrentInsertSafety:
                     )
                     for h in range(n_events)
                 ]
-                database.insert_events_for_module(module_name, events)
+                # Retry on lock contention (WAL concurrent writes)
+                import time
+                for attempt in range(3):
+                    try:
+                        database.insert_events_for_module(module_name, events)
+                        break
+                    except Exception as e:
+                        if "locked" in str(e) and attempt < 2:
+                            time.sleep(0.1 * (attempt + 1))
+                            continue
+                        raise
                 database.close()
             except Exception as exc:
                 errors.append(exc)
@@ -518,8 +538,8 @@ class TestConcurrentInsertSafety:
         )
         t1.start()
         t2.start()
-        t1.join(timeout=5)
-        t2.join(timeout=5)
+        t1.join(timeout=15)
+        t2.join(timeout=15)
 
         assert not errors, f"Concurrent inserts failed: {errors}"
 

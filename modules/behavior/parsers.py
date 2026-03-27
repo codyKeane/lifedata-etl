@@ -326,7 +326,10 @@ def parse_dream_structured(file_path: str) -> list[Event]:
                 setting_list = [s.strip() for s in setting.split(";") if s.strip()]
                 action_list = [a.strip() for a in actions.split(";") if a.strip()]
 
-                narrative = f"Setting: {setting}. Characters: {characters}. Events: {actions}. Emotion: {emotion}."
+                narrative = (
+                    f"Setting: {setting}. Characters: {characters}. "
+                    f"Events: {actions}. Emotion: {emotion}."
+                )
                 if connection:
                     narrative += f" Connection: {connection}."
 
