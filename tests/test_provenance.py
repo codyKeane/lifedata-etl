@@ -13,13 +13,10 @@ import logging
 import os
 import sys
 
-import pytest
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.event import Event
 from core.parser_utils import safe_parse_rows
-
 
 # ══════════════════════════════════════════════════════════════
 # 1. EVENT PROVENANCE FIELD
@@ -362,8 +359,8 @@ class TestTraceCLI:
     def test_trace_finds_event(self, tmp_path, capsys, monkeypatch):
         evt, config_path, env_path = self._setup_db_with_event(tmp_path)
 
-        import run_etl
         import core.config as config_mod
+        import run_etl
 
         original_load = config_mod.load_config
         def patched_load(path=None, env_path_arg=None):
@@ -386,8 +383,8 @@ class TestTraceCLI:
     def test_trace_shows_daily_summaries(self, tmp_path, capsys, monkeypatch):
         evt, config_path, env_path = self._setup_db_with_event(tmp_path)
 
-        import run_etl
         import core.config as config_mod
+        import run_etl
 
         original_load = config_mod.load_config
         def patched_load(path=None, env_path_arg=None):
@@ -406,8 +403,8 @@ class TestTraceCLI:
     def test_trace_not_found(self, tmp_path, capsys, monkeypatch):
         evt, config_path, env_path = self._setup_db_with_event(tmp_path)
 
-        import run_etl
         import core.config as config_mod
+        import run_etl
 
         original_load = config_mod.load_config
         def patched_load(path=None, env_path_arg=None):
@@ -427,8 +424,8 @@ class TestTraceCLI:
         """Short prefix of raw_source_id should still find the event."""
         evt, config_path, env_path = self._setup_db_with_event(tmp_path)
 
-        import run_etl
         import core.config as config_mod
+        import run_etl
 
         original_load = config_mod.load_config
         def patched_load(path=None, env_path_arg=None):

@@ -5,14 +5,12 @@ Uses real SQLite fixtures (no mocks). Correlated/anti-correlated data is generat
 over 30 days to ensure the Correlator has sufficient aligned observations.
 """
 
-import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from analysis.hypothesis import HypothesisTest, load_hypotheses, run_all_hypotheses
 from core.event import Event
-
 
 # ──────────────────────────────────────────────────────────────
 # Helpers
@@ -577,8 +575,9 @@ class TestHypothesisConfigLagDays:
 
     def test_lag_days_negative_rejected(self):
         """Negative lag_days raises ValidationError."""
-        from core.config_schema import HypothesisConfig
         from pydantic import ValidationError
+
+        from core.config_schema import HypothesisConfig
 
         with pytest.raises(ValidationError, match="lag_days"):
             HypothesisConfig(
@@ -587,8 +586,9 @@ class TestHypothesisConfigLagDays:
 
     def test_lag_days_above_seven_rejected(self):
         """lag_days > 7 raises ValidationError."""
-        from core.config_schema import HypothesisConfig
         from pydantic import ValidationError
+
+        from core.config_schema import HypothesisConfig
 
         with pytest.raises(ValidationError, match="lag_days"):
             HypothesisConfig(

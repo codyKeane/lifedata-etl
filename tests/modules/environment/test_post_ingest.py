@@ -9,8 +9,7 @@ Covers:
 """
 
 import json
-
-import pytest
+from datetime import UTC
 
 from core.event import Event
 from modules.environment import create_module
@@ -27,9 +26,9 @@ def _make_event(source_module, event_type, value_numeric=None, value_text=None,
                 value_json=None, location_lat=None, location_lon=None,
                 minute_offset=0):
     """Build an environment event at a known timestamp on TARGET_DATE."""
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import datetime, timedelta
 
-    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=tz.utc) + timedelta(minutes=minute_offset)
+    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=UTC) + timedelta(minutes=minute_offset)
     ts_utc = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     ts_local = (dt - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S-05:00")
     return Event(

@@ -18,7 +18,6 @@ from typing import Any
 from core.event import Event
 from core.module_interface import ModuleInterface
 
-
 # ── Concrete test implementation ────────────────────────────────
 
 

@@ -3,21 +3,20 @@ Tests for analysis/reports.py — daily report generation and sparkline helper.
 """
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 import yaml
 
-from core.event import Event
 from analysis.reports import (
-    generate_daily_report,
-    generate_weekly_report,
-    generate_monthly_report,
+    _resolve_trend_metrics,
     _sparkline,
     _yaml_frontmatter,
-    _resolve_trend_metrics,
+    generate_daily_report,
+    generate_monthly_report,
+    generate_weekly_report,
 )
-
+from core.event import Event
 
 # ──────────────────────────────────────────────────────────────
 # Helpers

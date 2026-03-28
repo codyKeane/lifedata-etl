@@ -329,7 +329,10 @@ def process_pedometer(filepath: str, window_min: int) -> dict:
             delta = last - first
 
         if delta < 0:
-            delta = 0  # Counter reset
+            # Counter reset mid-window: last is the cumulative count since
+            # the reset (counter resets to 0), so use it as the delta to
+            # recover post-reset steps instead of discarding the entire window.
+            delta = last
 
         result[wk] = {
             "steps_delta": delta,

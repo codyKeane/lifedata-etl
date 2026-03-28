@@ -8,7 +8,6 @@ Derived metrics tested:
 """
 
 import json
-import math
 
 import pytest
 
@@ -86,13 +85,13 @@ class TestDailyStepTotal:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T10:00:00+00:00",
                 value_numeric=3000.0,
             ),
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T14:00:00+00:00",
                 value_numeric=5000.0,
             ),
@@ -124,7 +123,7 @@ class TestDailyStepTotal:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T15:00:00+00:00",
                 value_numeric=4200.0,
             ),
@@ -147,13 +146,13 @@ class TestDailyStepTotal:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T09:00:00+00:00",
                 value_numeric=2000.0,
             ),
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T16:00:00+00:00",
                 value_numeric=6000.0,
             ),
@@ -180,13 +179,13 @@ class TestDailyStepTotal:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T10:00:00+00:00",
                 value_numeric=3000.0,
             ),
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T14:00:00+00:00",
                 value_numeric=None,
             ),
@@ -205,7 +204,7 @@ class TestDailyStepTotal:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T12:00:00+00:00",
                 value_numeric=5000.0,
             ),
@@ -385,8 +384,8 @@ class TestSleepDuration:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T23:00:00+00:00",
-                timestamp_local=f"2026-03-19T18:00:00-05:00",
+                timestamp_utc="2026-03-19T23:00:00+00:00",
+                timestamp_local="2026-03-19T18:00:00-05:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -417,8 +416,8 @@ class TestSleepDuration:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T23:00:00+00:00",
-                timestamp_local=f"2026-03-19T18:00:00-05:00",
+                timestamp_utc="2026-03-19T23:00:00+00:00",
+                timestamp_local="2026-03-19T18:00:00-05:00",
                 value_text="sleep_start",
             ),
         ]
@@ -436,8 +435,8 @@ class TestSleepDuration:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T00:00:00+00:00",
-                timestamp_local=f"2026-03-18T19:00:00-05:00",
+                timestamp_utc="2026-03-19T00:00:00+00:00",
+                timestamp_local="2026-03-18T19:00:00-05:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -490,8 +489,8 @@ class TestSleepDuration:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T22:00:00+00:00",
-                timestamp_local=f"2026-03-19T17:00:00-05:00",
+                timestamp_utc="2026-03-19T22:00:00+00:00",
+                timestamp_local="2026-03-19T17:00:00-05:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -529,8 +528,8 @@ class TestSleepDuration:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T23:00:00+00:00",
-                timestamp_local=f"2026-03-19T18:00:00-05:00",
+                timestamp_utc="2026-03-19T23:00:00+00:00",
+                timestamp_local="2026-03-19T18:00:00-05:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -602,7 +601,7 @@ class TestDisabledMetrics:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T10:00:00+00:00",
                 value_numeric=5000.0,
             ),
@@ -643,7 +642,7 @@ class TestDisabledMetrics:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T23:00:00+00:00",
+                timestamp_utc="2026-03-19T23:00:00+00:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -748,13 +747,13 @@ class TestGetDailySummary:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T10:00:00+00:00",
                 value_numeric=3000.0,
             ),
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T14:00:00+00:00",
                 value_numeric=5000.0,
             ),
@@ -775,9 +774,9 @@ class TestGetDailySummary:
         assert summary["total_body_events"] == 3
         assert "event_counts" in summary
         ec = summary["event_counts"]
-        assert "body.steps.step_count" in ec
-        assert ec["body.steps.step_count"]["count"] == 2
-        assert ec["body.steps.step_count"]["sum"] == 8000.0
+        assert "body.steps.step_count_sensor" in ec
+        assert ec["body.steps.step_count_sensor"]["count"] == 2
+        assert ec["body.steps.step_count_sensor"]["sum"] == 8000.0
         assert "body.caffeine.intake" in ec
         assert ec["body.caffeine.intake"]["count"] == 1
 
@@ -998,8 +997,8 @@ class TestSleepEdgeCases:
         Lines 357, 359: start_dt/end_dt tzinfo is None -> replace with UTC
         """
         start_evt = Event(
-            timestamp_utc=f"2026-03-19T23:00:00",
-            timestamp_local=f"2026-03-19T18:00:00",
+            timestamp_utc="2026-03-19T23:00:00",
+            timestamp_local="2026-03-19T18:00:00",
             timezone_offset="-0500",
             source_module="body.sleep",
             event_type="sleep_start",
@@ -1032,7 +1031,7 @@ class TestSleepEdgeCases:
             _make_event(
                 "body.sleep",
                 "sleep_start",
-                timestamp_utc=f"2026-03-19T23:00:00+00:00",
+                timestamp_utc="2026-03-19T23:00:00+00:00",
                 value_text="sleep_start",
             ),
             _make_event(
@@ -1094,13 +1093,13 @@ class TestMultipleDays:
         events = [
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{DATE}T10:00:00+00:00",
                 value_numeric=3000.0,
             ),
             _make_event(
                 "body.steps",
-                "step_count",
+                "step_count_sensor",
                 timestamp_utc=f"{date2}T10:00:00+00:00",
                 value_numeric=7000.0,
             ),

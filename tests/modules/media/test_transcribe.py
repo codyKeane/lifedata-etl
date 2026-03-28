@@ -172,7 +172,7 @@ class TestTranscribePending:
 
         # Verify .txt was written
         assert os.path.exists(txt_path)
-        with open(txt_path, "r") as f:
+        with open(txt_path) as f:
             assert f.read() == "I had a dream about flying."
 
         # Clean up

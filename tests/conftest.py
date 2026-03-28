@@ -26,17 +26,18 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 if not os.environ.get("PII_HMAC_KEY"):
     os.environ["PII_HMAC_KEY"] = "test-only-hmac-key-not-for-production"
 
-from core.event import Event
-from core.database import Database
+from datetime import UTC
+
 from core.config_schema import (
-    LifeDataConfig,
-    SecurityConfig,
-    ModulesConfig,
     AnalysisConfig,
+    LifeDataConfig,
+    ModulesConfig,
     RetentionConfig,
     ScheduleConfig,
+    SecurityConfig,
 )
-
+from core.database import Database
+from core.event import Event
 
 # ──────────────────────────────────────────────────────────────
 # Timestamps — realistic dates within the past week (America/Chicago)
@@ -49,9 +50,9 @@ _TZ_OFFSET = "-0500"
 
 def _ts(offset_minutes: int = 0) -> tuple[str, str]:
     """Return (timestamp_utc, timestamp_local) offset from base by minutes."""
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import datetime, timedelta
 
-    utc_dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=tz.utc) + timedelta(
+    utc_dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=UTC) + timedelta(
         minutes=offset_minutes
     )
     local_dt = utc_dt - timedelta(hours=5)

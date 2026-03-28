@@ -2,8 +2,6 @@
 Tests for core/config.py — typed config loading and validation.
 """
 
-import os
-import textwrap
 
 import pytest
 import yaml

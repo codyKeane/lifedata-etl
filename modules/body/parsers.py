@@ -155,7 +155,7 @@ def parse_samsung_health(file_path: str) -> list[Event]:
     # Determine source type from filename
     if basename.startswith("steps_"):
         source_module = "body.steps"
-        event_type = "step_count"
+        event_type = "step_count_samsung"
     elif basename.startswith("hr_"):
         source_module = "body.heart_rate"
         event_type = "measurement"
@@ -165,7 +165,7 @@ def parse_samsung_health(file_path: str) -> list[Event]:
     elif basename.startswith("health_"):
         # Generic health export — will auto-detect per row
         source_module = "body.steps"
-        event_type = "step_count"
+        event_type = "step_count_samsung"
     else:
         log.warning(f"Unknown health file type: {basename}")
         return []
@@ -482,7 +482,7 @@ def parse_pedometer_summary(file_path: str) -> list[Event]:
                         timestamp_local=ts_local,
                         timezone_offset=tz_off,
                         source_module="body.steps",
-                        event_type="step_count",
+                        event_type="step_count_sensor",
                         value_numeric=steps_delta,
                         value_json=safe_json(extra),
                         tags="sensor_logger,automated,5min_window",

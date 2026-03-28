@@ -1,11 +1,8 @@
 """Tests for scripts/process_sensors.py — sensor logger pre-processor."""
 
-import math
 import os
 import sys
 from pathlib import Path
-
-import pytest
 
 # Ensure scripts directory is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

@@ -4,9 +4,8 @@ Tests for modules/mind/parsers.py — morning and evening check-in parsers.
 
 import json
 
-from modules.mind.parsers import parse_morning, parse_evening
-from tests.conftest import MORNING_LINES, EVENING_LINES
-
+from modules.mind.parsers import parse_evening, parse_morning
+from tests.conftest import EVENING_LINES, MORNING_LINES
 
 # ──────────────────────────────────────────────────────────────
 # Morning parser

@@ -1,10 +1,8 @@
 """Tests for scripts/fetch_rss.py — RSS feed fetcher with VADER sentiment."""
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Unit tests

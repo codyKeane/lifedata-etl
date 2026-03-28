@@ -6,7 +6,6 @@ Each test class covers one metric family with edge cases.
 """
 
 import json
-import math
 
 import pytest
 
@@ -122,7 +121,7 @@ def _get_column_names(db):
 def _row_to_dict(db, row):
     """Convert a row tuple to a dict using column names."""
     cols = _get_column_names(db)
-    return dict(zip(cols, row))
+    return dict(zip(cols, row, strict=False))
 
 
 # ──────────────────────────────────────────────────────────────

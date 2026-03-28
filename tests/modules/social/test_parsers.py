@@ -5,21 +5,20 @@ Tests for modules/social/parsers.py — notifications, calls, sms, app_usage, wi
 import json
 
 from modules.social.parsers import (
-    parse_notifications,
-    parse_calls,
-    parse_sms,
-    parse_app_usage,
-    parse_wifi,
     _hash_contact,
     _hash_phone,
+    parse_app_usage,
+    parse_calls,
+    parse_notifications,
+    parse_sms,
+    parse_wifi,
 )
 from tests.conftest import (
-    NOTIFICATION_LINES,
-    CALL_LINES,
-    SMS_LINES,
     APP_USAGE_LINES,
+    CALL_LINES,
+    NOTIFICATION_LINES,
+    SMS_LINES,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # PII hashing

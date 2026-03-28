@@ -10,12 +10,11 @@ After all tests complete, writes results to docs/PERFORMANCE_BASELINE.md.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +24,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.database import Database
 from core.event import Event
-from core.utils import safe_json
 
 # ── Shared state for the final report ────────────────────────
 
@@ -35,7 +33,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 BASELINE_PATH = PROJECT_ROOT / "docs" / "PERFORMANCE_BASELINE.md"
 
 # Base timestamp: 2026-01-01T00:00:00Z
-_BASE_UTC = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE_UTC = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _record(name: str, dataset: str, duration: float, throughput: str) -> None:

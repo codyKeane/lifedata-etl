@@ -5,14 +5,13 @@ Tests for modules/oracle/parsers.py — iching, rng, schumann, planetary_hours.
 import json
 
 from modules.oracle.parsers import (
-    parse_iching_casting,
     parse_iching_auto,
-    parse_rng_samples,
-    parse_rng_raw,
-    parse_schumann,
+    parse_iching_casting,
     parse_planetary_hours,
+    parse_rng_raw,
+    parse_rng_samples,
+    parse_schumann,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # I Ching casting parser

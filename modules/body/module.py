@@ -227,23 +227,41 @@ class BodyModule(ModuleInterface):
 
         # --- Daily step total ---
         if self.is_metric_enabled("body.derived:daily_step_total"):
+            # Query each step source separately to avoid double-counting
+            # when both Samsung Health and Sensor Logger data exist.
+            # Prefer sensor_logger (higher frequency) over samsung_health.
             rows = db.execute(
                 """
-                SELECT SUM(value_numeric) as total_steps, COUNT(*) as readings
+                SELECT event_type,
+                       SUM(value_numeric) as total_steps,
+                       COUNT(*) as readings
                 FROM events
                 WHERE source_module = 'body.steps'
+                  AND event_type IN (
+                      'step_count_sensor', 'step_count_samsung', 'step_count'
+                  )
                   AND date(timestamp_utc) = ?
                   AND value_numeric IS NOT NULL
+                GROUP BY event_type
+                ORDER BY CASE event_type
+                    WHEN 'step_count_sensor' THEN 1
+                    WHEN 'step_count_samsung' THEN 2
+                    ELSE 3
+                END
                 """,
                 (today,),
             )
-            row: Any = (
-                rows.fetchone()
-                if hasattr(rows, "fetchone")
-                else (list(rows)[0] if rows else None)
+            result_set = (
+                rows.fetchall()
+                if hasattr(rows, "fetchall")
+                else list(rows) if rows else []
             )
-            if row and row[0] is not None and row[0] > 0:
-                step_total = int(row[0])
+            # Pick the first (highest priority) source that has data
+            row: Any = result_set[0] if result_set else None
+            if row and row[1] is not None and row[1] > 0:
+                step_total = int(row[1])
+                step_readings = row[2]
+                step_source = row[0]
                 step_goal = self._config.get("step_goal", 8000)
                 derived_events.append(
                     Event(
@@ -255,9 +273,10 @@ class BodyModule(ModuleInterface):
                         value_numeric=float(step_total),
                         value_json=safe_json(
                             {
-                                "readings": row[1],
+                                "readings": step_readings,
                                 "goal": step_goal,
                                 "goal_pct": round(step_total / step_goal * 100, 1),
+                                "source": step_source,
                             }
                         ),
                         confidence=0.95,
@@ -284,7 +303,11 @@ class BodyModule(ModuleInterface):
                 (today,),
             )
             caffeine_events = []
-            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            result_set = (
+                rows.fetchall()
+                if hasattr(rows, "fetchall")
+                else list(rows) if rows else []
+            )
             for r in result_set:
                 ts = r[0]
                 mg = safe_float(r[1])
@@ -348,7 +371,11 @@ class BodyModule(ModuleInterface):
                 (today, today),
             )
             sleep_events = []
-            result_set = rows.fetchall() if hasattr(rows, "fetchall") else rows
+            result_set = (
+                rows.fetchall()
+                if hasattr(rows, "fetchall")
+                else list(rows) if rows else []
+            )
             for r in result_set:
                 sleep_events.append((r[0], r[1]))
 

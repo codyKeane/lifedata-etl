@@ -96,7 +96,7 @@ class Event:
         )
         raw = (
             f"{self.timestamp_utc}|{self.source_module}|"
-            f"{self.event_type}|{self.value_text}|{num_str}"
+            f"{self.event_type}|{self.value_text}|{self.value_json}|{num_str}"
         )
         self._cached_raw_source_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
         return self._cached_raw_source_id

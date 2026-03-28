@@ -9,12 +9,10 @@ Covers:
 
 import json
 import os
-
-import pytest
+from datetime import UTC
 
 from core.event import Event
 from modules.meta import create_module
-
 
 TARGET_DATE = "2026-03-20"
 TZ_OFFSET = "-0500"
@@ -23,9 +21,9 @@ TZ_OFFSET = "-0500"
 def _make_event(source_module, event_type, value_numeric=None, value_text=None,
                 minute_offset=0):
     """Build an event at a known timestamp on TARGET_DATE."""
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import datetime, timedelta
 
-    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=tz.utc) + timedelta(minutes=minute_offset)
+    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=UTC) + timedelta(minutes=minute_offset)
     ts_utc = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     ts_local = (dt - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S-05:00")
     return Event(
@@ -790,8 +788,8 @@ class TestGetDailySummary:
         today = today_local()
 
         # Insert directly via SQL to bypass JSON validation in insert_events
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
+        from datetime import datetime
+        now = datetime.now(UTC).isoformat()
         db.conn.execute(
             """INSERT INTO events
                (event_id, raw_source_id, timestamp_utc, timestamp_local,
@@ -844,8 +842,8 @@ class TestGetDailySummary:
         today = today_local()
 
         # Insert with NULL value_json via SQL
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
+        from datetime import datetime
+        now = datetime.now(UTC).isoformat()
         db.conn.execute(
             """INSERT INTO events
                (event_id, raw_source_id, timestamp_utc, timestamp_local,

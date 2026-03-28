@@ -2,13 +2,12 @@
 Tests for modules/meta/completeness.py — data completeness checking.
 """
 
+from core.event import Event
 from modules.meta.completeness import (
-    check_daily_completeness,
     EXPECTED_DAILY_SOURCES,
     OPTIONAL_DAILY_SOURCES,
+    check_daily_completeness,
 )
-from core.event import Event
-
 
 # ──────────────────────────────────────────────────────────────
 # Helpers

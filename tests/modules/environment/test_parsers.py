@@ -4,18 +4,18 @@ barometer/light/magnetometer summary parsers.
 """
 
 import json
+
 import pytest
 
 from modules.environment.parsers import (
-    parse_hourly,
-    parse_geofence,
     parse_astro,
     parse_barometer_summary,
+    parse_geofence,
+    parse_hourly,
     parse_light_summary,
     parse_magnetometer_summary,
 )
-from tests.conftest import HOURLY_LINES, GEOFENCE_LINES, ASTRO_LINES
-
+from tests.conftest import ASTRO_LINES, GEOFENCE_LINES, HOURLY_LINES
 
 # ──────────────────────────────────────────────────────────────
 # Hourly parser

@@ -6,19 +6,18 @@ import json
 
 from modules.device.parsers import (
     parse_battery,
-    parse_screen,
-    parse_charging,
     parse_bluetooth,
+    parse_charging,
+    parse_screen,
 )
 from tests.conftest import (
     BATTERY_V3_LINES,
     BATTERY_V4_LINES,
+    BLUETOOTH_V4_LINES,
+    CHARGING_V4_LINES,
     SCREEN_V3_LINES,
     SCREEN_V4_LINES,
-    CHARGING_V4_LINES,
-    BLUETOOTH_V4_LINES,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # Battery parser

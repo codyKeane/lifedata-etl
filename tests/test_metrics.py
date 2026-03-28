@@ -8,17 +8,12 @@ Tests for:
   3. _print_status formatting and warning thresholds
 """
 
-import json
 import os
 import sys
-import time
-
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.metrics import ETLMetrics, ModuleMetrics, write_metrics, read_last_n_metrics
-
+from core.metrics import ETLMetrics, ModuleMetrics, read_last_n_metrics, write_metrics
 
 # ══════════════════════════════════════════════════════════════
 # 1. DATACLASS SERIALIZATION
@@ -161,9 +156,9 @@ class TestOrchestratorMetrics:
 
     def test_run_produces_metrics_in_summary(self, tmp_path):
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
@@ -186,10 +181,10 @@ class TestOrchestratorMetrics:
 
     def test_per_module_metrics_populated(self, tmp_path):
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
             _populate_environment_csvs,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(
@@ -220,11 +215,12 @@ class TestOrchestratorMetrics:
 
     def test_failed_module_recorded(self, tmp_path):
         from unittest.mock import patch
+
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
             _populate_environment_csvs,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(
@@ -249,9 +245,9 @@ class TestOrchestratorMetrics:
 
     def test_metrics_written_to_file(self, tmp_path):
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])

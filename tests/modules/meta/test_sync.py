@@ -10,10 +10,9 @@ Covers:
 import json
 import os
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from modules.meta.sync import check_sync_lag, check_db_backup_age, verify_syncthing_relay
-
+from modules.meta.sync import check_db_backup_age, check_sync_lag, verify_syncthing_relay
 
 # ──────────────────────────────────────────────────────────────
 # check_sync_lag

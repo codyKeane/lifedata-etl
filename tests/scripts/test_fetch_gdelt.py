@@ -1,9 +1,8 @@
 """Tests for scripts/fetch_gdelt.py — GDELT DOC 2.0 API fetcher."""
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

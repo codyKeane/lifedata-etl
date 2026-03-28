@@ -6,20 +6,19 @@ time gap detection, and exception handling for all check paths.
 """
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
 
 from modules.meta.quality import (
-    validate_events,
-    detect_time_gaps,
     _check_future_timestamps,
     _check_numeric_ranges,
     _check_suspicious_duplicates,
     _check_time_gaps,
+    detect_time_gaps,
+    validate_events,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # Fixtures
@@ -104,7 +103,7 @@ class TestFutureTimestamps:
         assert issues == []
 
     def test_future_timestamp_detected(self, mem_db):
-        future = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+        future = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
         mem_db.insert("e1", future, future, "device.screen")
         issues = _check_future_timestamps(mem_db)
         assert len(issues) == 1

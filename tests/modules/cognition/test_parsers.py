@@ -6,15 +6,14 @@ digit_span, time_production, time_estimation, typing_speed.
 import json
 
 from modules.cognition.parsers import (
-    parse_simple_rt,
     parse_choice_rt,
-    parse_gonogo,
     parse_digit_span,
-    parse_time_production,
+    parse_gonogo,
+    parse_simple_rt,
     parse_time_estimation,
+    parse_time_production,
     parse_typing_speed,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # Simple RT parser

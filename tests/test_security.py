@@ -9,10 +9,7 @@ Tests for:
 """
 
 import os
-import stat
 import sys
-
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -140,6 +137,7 @@ class TestParserUtilsSanitization:
         """When a parse error occurs on a line with GPS coords, the logged
         raw content should have coords truncated."""
         import logging
+
         from core.parser_utils import safe_parse_rows
 
         csv_path = str(tmp_path / "test.csv")
@@ -164,6 +162,7 @@ class TestParserUtilsSanitization:
     def test_raw_line_with_phone_is_sanitized_in_log(self, tmp_path, caplog):
         """Phone numbers in error-logged raw lines should be redacted."""
         import logging
+
         from core.parser_utils import safe_parse_rows
 
         csv_path = str(tmp_path / "test.csv")
@@ -206,6 +205,7 @@ class TestStartupSecurityChecks:
     def test_env_permission_warning(self, tmp_path, caplog):
         """Warn if .env permissions are not 0600."""
         import logging
+
         from core.orchestrator import Orchestrator
 
         ld = self._make_lifedata_env(tmp_path)
@@ -228,6 +228,7 @@ class TestStartupSecurityChecks:
     def test_stfolder_warning(self, tmp_path, caplog):
         """Warn if ~/LifeData/ contains .stfolder/ (Syncthing marker)."""
         import logging
+
         from core.orchestrator import Orchestrator
 
         ld = self._make_lifedata_env(tmp_path)
@@ -249,6 +250,7 @@ class TestStartupSecurityChecks:
         """When everything is correctly configured, no warnings should fire
         (except possibly disk encryption which is best-effort)."""
         import logging
+
         from core.orchestrator import Orchestrator
 
         ld = self._make_lifedata_env(tmp_path)
@@ -277,6 +279,7 @@ class TestStartupSecurityChecks:
     def test_directory_permission_warning(self, tmp_path, caplog):
         """Warn if ~/LifeData/ permissions are not 0700."""
         import logging
+
         from core.orchestrator import Orchestrator
 
         ld = self._make_lifedata_env(tmp_path)

@@ -5,7 +5,6 @@ failure handling, quarantine collection, and correlation persistence.
 """
 
 import os
-import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +12,6 @@ import pytest
 
 from core.config import _resolve_env_vars
 from core.orchestrator import Orchestrator, enforce_log_rotation
-
 
 # ──────────────────────────────────────────────────────────────
 # Path safety — _is_safe_path
@@ -200,8 +198,8 @@ class TestLogRotation:
 def _setup_orchestrator(tmp_path, allowlist=None, extra_modules=None):
     """Set up and return an Orchestrator from the integration helpers."""
     from tests.test_etl_integration import (
-        _write_config_yaml,
         _make_orchestrator,
+        _write_config_yaml,
     )
     config_path, env_path = _write_config_yaml(
         tmp_path, allowlist=allowlist, extra_modules=extra_modules,
@@ -418,9 +416,9 @@ class TestOrchestratorRun:
     def test_dry_run_no_db_writes(self, tmp_path):
         """dry_run=True should parse events but not insert them."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -444,9 +442,9 @@ class TestOrchestratorRun:
     def test_dry_run_skips_backup_and_post_ingest(self, tmp_path):
         """dry_run should not call backup() or post_ingest()."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -461,9 +459,9 @@ class TestOrchestratorRun:
     def test_report_generation_on_run(self, tmp_path):
         """report=True should trigger report generation."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -478,9 +476,9 @@ class TestOrchestratorRun:
     def test_report_generation_exception_handled(self, tmp_path):
         """Report generation failure should not crash the run."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -496,9 +494,9 @@ class TestOrchestratorRun:
     def test_wal_checkpoint_failure_handled(self, tmp_path):
         """WAL checkpoint failure should be logged, not raised."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -513,8 +511,8 @@ class TestOrchestratorRun:
     def test_no_modules_loaded(self, tmp_path):
         """When no modules match, run() returns early with zero counts."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
 
@@ -528,12 +526,12 @@ class TestOrchestratorRun:
 
     def test_quarantine_collection(self, tmp_path):
         """Modules with quarantined_files attribute should have them collected."""
+        from modules.device.module import DeviceModule
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
-        from modules.device.module import DeviceModule
 
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -553,9 +551,9 @@ class TestOrchestratorRun:
     def test_persist_correlations_called_on_normal_run(self, tmp_path):
         """_persist_correlations should be called during a normal (non-dry) run."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -571,9 +569,9 @@ class TestOrchestratorRun:
     def test_persist_correlations_skipped_on_dry_run(self, tmp_path):
         """_persist_correlations should NOT be called during dry run."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -588,9 +586,9 @@ class TestOrchestratorRun:
     def test_module_failure_recorded(self, tmp_path):
         """A module that throws during discover_files should be marked failed."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(
             tmp_path, allowlist=["device", "environment"]
@@ -611,9 +609,9 @@ class TestOrchestratorRun:
     def test_post_ingest_failure_does_not_crash(self, tmp_path):
         """post_ingest failure should not undo inserted events."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")
@@ -633,9 +631,9 @@ class TestOrchestratorRun:
     def test_metrics_write_failure_handled(self, tmp_path):
         """Failure to write metrics.jsonl should not crash the run."""
         from tests.test_etl_integration import (
-            _write_config_yaml,
             _make_orchestrator,
             _populate_device_csvs,
+            _write_config_yaml,
         )
         config_path, env_path = _write_config_yaml(tmp_path, allowlist=["device"])
         raw_dir = str(tmp_path / "raw" / "LifeData")

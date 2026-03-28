@@ -18,8 +18,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.event import Event
-from core.parser_utils import ParseResult, safe_parse_rows, QUARANTINE_THRESHOLD
-
+from core.parser_utils import safe_parse_rows
 
 # ══════════════════════════════════════════════════════════════
 # 1. LOCKFILE TESTS
@@ -152,16 +151,18 @@ class TestFileStabilityConfig:
 
     def test_etl_config_rejects_negative(self):
         """Negative values should be rejected by the validator."""
-        from core.config_schema import EtlConfig
         from pydantic import ValidationError
+
+        from core.config_schema import EtlConfig
 
         with pytest.raises(ValidationError):
             EtlConfig(file_stability_seconds=-1)
 
     def test_etl_config_rejects_over_600(self):
         """Values over 600 should be rejected."""
-        from core.config_schema import EtlConfig
         from pydantic import ValidationError
+
+        from core.config_schema import EtlConfig
 
         with pytest.raises(ValidationError):
             EtlConfig(file_stability_seconds=601)
@@ -189,10 +190,11 @@ class TestFileStabilityConfig:
         """The orchestrator should use the configured value, not a hardcoded one.
         With file_stability_seconds=0, even very recent files should be processed."""
         import yaml
+
         from tests.test_etl_integration import (
-            _write_config_yaml,
-            _make_orchestrator,
             _BASE_EPOCH,
+            _make_orchestrator,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(
@@ -586,11 +588,10 @@ class TestQuarantineInOrchestrator:
 
     def test_quarantined_files_in_summary(self, tmp_path):
         """The orchestrator summary should include a quarantined_files key."""
-        import yaml
         from tests.test_etl_integration import (
-            _write_config_yaml,
-            _make_orchestrator,
             _BASE_EPOCH,
+            _make_orchestrator,
+            _write_config_yaml,
         )
 
         config_path, env_path = _write_config_yaml(

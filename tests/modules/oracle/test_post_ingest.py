@@ -10,7 +10,7 @@ Covers:
 """
 
 import json
-import math
+from datetime import UTC
 
 import pytest
 
@@ -40,9 +40,9 @@ def _oracle_config():
 def _make_event(source_module, event_type, value_numeric, minute_offset=0,
                 value_text=None, value_json=None):
     """Build a raw oracle event at a known timestamp on TARGET_DATE."""
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import datetime, timedelta
 
-    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=tz.utc) + timedelta(minutes=minute_offset)
+    dt = datetime(2026, 3, 20, 13, 0, 0, tzinfo=UTC) + timedelta(minutes=minute_offset)
     ts_utc = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     ts_local = (dt - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S-05:00")
     return Event(

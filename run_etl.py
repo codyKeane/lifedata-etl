@@ -68,8 +68,8 @@ def _acquire_lock():
     return lock_fd
 
 
-from core.metrics import read_last_n_metrics, ETLMetrics
 from core.database import Database
+from core.metrics import read_last_n_metrics
 
 
 def _print_status() -> int:

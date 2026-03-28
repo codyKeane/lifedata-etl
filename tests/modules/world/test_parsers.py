@@ -5,12 +5,11 @@ Tests for modules/world/parsers.py — news JSON, markets JSON, RSS JSON, GDELT 
 import json
 
 from modules.world.parsers import (
-    parse_news_json,
-    parse_markets_json,
-    parse_rss_json,
     parse_gdelt_json,
+    parse_markets_json,
+    parse_news_json,
+    parse_rss_json,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # News JSON parser

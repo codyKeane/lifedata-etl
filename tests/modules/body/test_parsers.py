@@ -4,19 +4,17 @@ movement/activity/pedometer summaries.
 """
 
 import json
-import os
 
 from modules.body.parsers import (
+    parse_activity_summary,
+    parse_movement_summary,
+    parse_pedometer_summary,
     parse_quicklog,
+    parse_reaction,
     parse_samsung_health,
     parse_sleep,
-    parse_reaction,
-    parse_movement_summary,
-    parse_activity_summary,
-    parse_pedometer_summary,
 )
 from tests.conftest import QUICKLOG_CAFFEINE_LINES, QUICKLOG_MEAL_LINES
-
 
 # ──────────────────────────────────────────────────────────────
 # Quicklog parser
@@ -132,7 +130,7 @@ class TestParseSamsungHealth:
         events = parse_samsung_health(path)
         assert len(events) == 2
         assert events[0].source_module == "body.steps"
-        assert events[0].event_type == "step_count"
+        assert events[0].event_type == "step_count_samsung"
         assert events[0].value_numeric == 1500.0
 
     def test_heart_rate(self, csv_file_factory):
@@ -383,7 +381,7 @@ class TestParsePedometerSummary:
         events = parse_pedometer_summary(str(csv))
         assert len(events) == 2
         assert events[0].source_module == "body.steps"
-        assert events[0].event_type == "step_count"
+        assert events[0].event_type == "step_count_sensor"
         assert events[0].value_numeric == 150.0
 
     def test_zero_steps_skipped(self, tmp_path):

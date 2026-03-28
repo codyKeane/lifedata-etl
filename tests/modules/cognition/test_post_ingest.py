@@ -14,7 +14,6 @@ import json
 from core.event import Event
 from modules.cognition import create_module
 
-
 # ──────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────

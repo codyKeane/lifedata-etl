@@ -9,9 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.event import Event
 from analysis.correlator import Correlator
-
+from core.event import Event
 
 # ──────────────────────────────────────────────────────────────
 # Helpers

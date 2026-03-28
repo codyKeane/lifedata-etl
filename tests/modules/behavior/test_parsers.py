@@ -7,12 +7,11 @@ import json
 
 from modules.behavior.parsers import (
     parse_app_transitions,
-    parse_unlock_latency,
-    parse_hourly_steps,
     parse_dream_quicklog,
     parse_dream_structured,
+    parse_hourly_steps,
+    parse_unlock_latency,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # App transitions parser

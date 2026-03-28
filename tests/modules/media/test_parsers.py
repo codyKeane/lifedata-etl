@@ -5,22 +5,20 @@ and error handling paths.
 """
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 from modules.media.parsers import (
-    parse_voice_meta,
+    _convert_gps,
+    _extract_exif,
+    _get_vader,
+    _get_video_info,
+    _is_safe_media_id,
+    _read_transcript,
+    _safe_media_path,
     parse_photo_meta,
     parse_video_meta,
-    _is_safe_media_id,
-    _safe_media_path,
-    _read_transcript,
-    _extract_exif,
-    _convert_gps,
-    _get_video_info,
-    _get_vader,
+    parse_voice_meta,
 )
-
 
 # ──────────────────────────────────────────────────────────────
 # Media ID safety
@@ -328,7 +326,6 @@ class TestExtractExif:
             272: "Pixel 7",                # Model
         }
 
-        from PIL.ExifTags import TAGS, GPSTAGS
         with patch("modules.media.parsers.HAS_PILLOW", True):
             with patch("modules.media.parsers.Image") as mock_pil:
                 mock_pil.open.return_value = mock_img

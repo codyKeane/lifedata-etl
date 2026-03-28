@@ -1,10 +1,9 @@
 """Tests for scripts/fetch_schumann.py — Schumann resonance fetcher."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -625,12 +625,12 @@ class BehaviorModule(ModuleInterface):
                 bout_start = None
                 bout_len = 0
 
-        # Handle bout extending to end of day
+        # Handle bout extending to end of day (end_hour is exclusive, like mid-range bouts)
         if bout_len >= min_bout:
             bouts.append(
                 {
                     "start_hour": bout_start,
-                    "end_hour": 23,
+                    "end_hour": 24,
                     "duration_hours": bout_len,
                     "total_steps": sum(hourly[bout_start:24]),
                 }

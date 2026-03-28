@@ -4,13 +4,12 @@ Tests for core/database.py — SAVEPOINT rollback, deduplication, schema, migrat
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from core.database import Database
 from core.event import Event
-
 
 # ──────────────────────────────────────────────────────────────
 # Schema
@@ -585,7 +584,7 @@ class TestBackup:
             with open(old_backup, "w") as f:
                 f.write("fake backup")
             # Set mtime to 30 days ago
-            old_time = datetime.now(timezone.utc).timestamp() - (30 * 86400)
+            old_time = datetime.now(UTC).timestamp() - (30 * 86400)
             os.utime(old_backup, (old_time, old_time))
 
         database.backup(keep_days=7)

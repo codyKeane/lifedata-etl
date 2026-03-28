@@ -10,8 +10,7 @@ Covers:
 import os
 import time
 
-from modules.meta.storage import get_dir_size, storage_report, enforce_retention_policy
-
+from modules.meta.storage import enforce_retention_policy, get_dir_size, storage_report
 
 # ──────────────────────────────────────────────────────────────
 # get_dir_size

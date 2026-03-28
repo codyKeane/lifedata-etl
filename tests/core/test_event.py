@@ -3,7 +3,8 @@ Tests for core/event.py — Event model validation edge cases.
 """
 
 import json
-from core.event import MAX_VALUE_TEXT_LEN, MAX_VALUE_JSON_LEN, MAX_TAGS_LEN
+
+from core.event import MAX_TAGS_LEN, MAX_VALUE_JSON_LEN, MAX_VALUE_TEXT_LEN
 
 
 class TestEventValidation:
@@ -141,6 +142,12 @@ class TestEventDeduplication:
     def test_different_numeric_different_id(self, valid_event_factory):
         e1 = valid_event_factory(value_numeric=85.0)
         e2 = valid_event_factory(value_numeric=86.0)
+        assert e1.event_id != e2.event_id
+
+    def test_different_value_json_different_id(self, valid_event_factory):
+        e1 = valid_event_factory(value_json='{"status": "start"}')
+        e2 = valid_event_factory(value_json='{"status": "end"}')
+        assert e1.raw_source_id != e2.raw_source_id
         assert e1.event_id != e2.event_id
 
     def test_different_value_text_different_id(self, valid_event_factory):

@@ -2,11 +2,10 @@
 including main() execution, file I/O, load_config, and edge cases."""
 
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +15,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from compute_planetary_hours import (
     CHALDEAN_ORDER,
-    DAY_RULERS,
     compute_planetary_hours,
     load_config,
     main,
